@@ -5,11 +5,7 @@
 3. 如何使用storage class
 4. storage class如何实现
 
-5. 测试                                  
-
-
-
-
+5. 测试 
 
 # aws s3 存储类
 

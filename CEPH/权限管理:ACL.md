@@ -87,8 +87,6 @@
 - `s3:x-amz-grant-full-control` ‐ Require full control.
 - `s3:x-amz-acl` ‐ Require a [Canned ACL](https://docs.aws.amazon.com/AmazonS3/latest/dev-retired/acl-overview.html#canned-acl).
 
-
-
 ## ACL 底层保存
 
 [Actions, resources, and condition keys for Amazon S3](https://docs.aws.amazon.com/AmazonS3/latest/dev-retired/list_amazons3.html)
