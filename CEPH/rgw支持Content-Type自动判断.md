@@ -18,7 +18,7 @@ b RGWPutObj_ObjStore_SWIFT::get_params
 
 ## MIME是什么
 
-### 参考
+**参考**
 
 1. https://blog.csdn.net/jmjhx/article/details/99728680
 
@@ -33,19 +33,18 @@ MIME-type和Content-Type的关系：
 表示内容是 text/HTML 类型，也就是超文本文件。为什么是“text/HTML”而不是“HTML/text”或者别的什么？MIME Type 不是个人指定的，是经过 ietf 组织协商，以 RFC 的形式作为建议的标准发布在网上的，大多数的 Web 服务器和用户代理都会支持这个规范 (顺便说一句，Email 附件的类型也是通过 MIME Type 指定的)。
 通常只有一些在互联网上获得广泛应用的格式才会获得一个 MIME Type，如果是某个客户端自己定义的格式，一般只能以 application/x- 开头。
 
-## swift中mime使用方法
+## swift中通过后缀自动获取Content-Type
 
-### 配置（自有）
+### mime配置
 
 ```shell
 Option("rgw_mime_types_file", Option::TYPE_STR, Option::LEVEL_BASIC)
     .set_default("/etc/mime.types")
     .set_description("Path to local mime types file")
-    .set_long_description(
-        "The mime types file is needed in Swift when uploading an object. If object's "
-        "content type is not specified, RGW will use data from this file to assign "
-        "a content type to the object."),
+    .set_long_description("The mime types file is needed in Swift when uploading an object. If object's content type is not specified, RGW will use data from this file to assign a content type to the object."),
 ```
+
+该文件定义了众多Content-Type的map。在rgw启动时，`rgw_main.cc, main()`下，通过`rgw_tools_init`从文件读取到`ext_mime_map`中，以供后面使用。
 
 ### 流程分析
 
@@ -94,13 +93,17 @@ RGWPutObj_ObjStore_SWIFT::send_response
 	   |--> force_content_type
 ```
 
-其中`force_content_type`是为了SWIFT特殊的处理，S3可能不需要：
+其中`force_content_type`是为了Swift协议中规定即使不包含body也要返回Content-Type header,例如[put object in swift](https://docs.openstack.org/api-ref/object-store/index.html?expanded=create-or-replace-object-detail#create-or-replace-object)（对比Request和Respond，可以发现Request中Content-Type是optional，而Respond中确要求必须包含，这一点也可以在附录Swift和S3下PutObject抓包看到）。S3应该不需要：
 
-https://github.com/ceph/ceph/commit/106aeba206736d4080326f9bc191876bed63370b
+> ```
+> Swift sends Content-Type HTTP header even if the response
+> doesn't contain body. We have this behaviour implemented
+> until applying some changes in end_header() function.
+> ```
 
-https://github.com/ceph/ceph/commit/423cf136f15df3099c9266f55932542d303c2713
+[rgw: enforce Content-Type in Swift responses.](https://github.com/ceph/ceph/commit/106aeba206736d4080326f9bc191876bed63370b)
 
-
+[rgw: we should not overide Swift sent content type](https://github.com/ceph/ceph/commit/423cf136f15df3099c9266f55932542d303c2713)
 
 #### GetObj:
 
@@ -129,7 +132,7 @@ RGWCopyObj_ObjStore_SWIFT::send_response
 
 
 
-## 目前S3中通过header设置content-type流程
+## S3中通过header设置Content-Type
 
 ### PutObj
 
@@ -140,7 +143,7 @@ process_request
 RGWREST::get_handler
 RGWREST::preprocess
   |--> s->generic_attrs[giter->second] = env;//将s->info->env中的header存入
-  |--> //eg: ["user.rgw.content_type"] = "text/plain" //CONTENT_TYPE
+  //eg: ["user.rgw.content_type"] = "text/plain" //CONTENT_TYPE
 
 rgw_process_authenticated
 RGWPutObj::execute
@@ -149,7 +152,7 @@ rgw::putobj::AtomicObjectProcessor::complete
 RGWRados::Object::Write::write_meta
 RGWRados::Object::Write::_do_write_meta
 	|--> if(name.compare(RGW_ATTR_CONTENT_TYPE) == 0)
-  |--> content_type = rgw_bl_str(bl);
+    |--> content_type = rgw_bl_str(bl);
 ```
 
 ### GetObj
@@ -159,23 +162,15 @@ process_request
 rgw_process_authenticated
 RGWGetObj::execute
 RGWGetObj_ObjStore_S3::send_response_data
-  |-->if (iter->first.compare(RGW_ATTR_CONTENT_TYPE) == 0)
-  |-->  if (!content_type) {                                                                                                             
+  |--> if (iter->first.compare(RGW_ATTR_CONTENT_TYPE) == 0)
+  |--> if (!content_type) {                                                                                                             
   |-->  content_type_str = rgw_bl_str(iter->second);  
   |-->  content_type = content_type_str.c_str(); 
 ```
 
 ## 修改点
 
-在RGW
-
-
-
-
-
-
-
-
+在RGW中
 
 ## 附录
 
@@ -295,6 +290,44 @@ Date: Tue, 06 Jul 2021 16:27:08 GMT
 Connection: Keep-Alive
 #注意此处，没有Content-Type
 ```
+
+### CONTENT_TYPE与user.rgw.content_type
+
+`RGW_ATTR_CONTENT_TYPE`如何和`user.rgw.content_type`建立联系？
+
+解决：generic_attrs_map中定义了header和attrs名称的映射：
+
+```c++
+(gdb) p	generic_attrs_map
+$12 = std::map with 7 elements = {
+  ["CONTENT_TYPE"] = "user.rgw.content_type",
+  ["HTTP_CACHE_CONTROL"] = "user.rgw.cache_control",
+  ["HTTP_CONTENT_DISPOSITION"] = "user.rgw.content_disposition",
+  ["HTTP_CONTENT_ENCODING"] = "user.rgw.content_encoding",
+  ["HTTP_CONTENT_LANGUAGE"] = "user.rgw.content_language",
+  ["HTTP_EXPIRES"] = "user.rgw.expires",
+  ["HTTP_X_ROBOTS_TAG"] = "user.rgw.x-robots-tag"
+}
+```
+
+generic_attrs中的key则是user.rgw.xxx形式的：
+
+```shell
+p s->generic_attrs
+$9 = {
+  first = "user.rgw.content_type",
+  second = "video/webm"
+}
+```
+
+在attrs中，一般使用attrs[RGW_ATTR_xxx]这种形式来使用，查看代码发现RGW_ATTR_CONTENT_TYPE和generic_attrs_map中的user.rgw.content_type实际上是一致的，只是不同的表现形式：
+
+```c++
+#define RGW_ATTR_PREFIX  "user.rgw."
+#define RGW_ATTR_CONTENT_TYPE	RGW_ATTR_PREFIX "content_type"
+```
+
+因此问题解决。
 
 ## 路线
 
