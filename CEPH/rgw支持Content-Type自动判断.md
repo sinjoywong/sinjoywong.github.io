@@ -4,6 +4,7 @@
 
 ```shell
 搜索 mime.types, rgw_mime_types_file, ext_mime_map, rgw_find_mime_by_ext 得到更多信息。
+RGW_ATTR_CONTENT_TYPE
 ```
 
 gdb:
@@ -12,19 +13,14 @@ gdb:
 b	rgw_tools_init
 b	rgw_find_mime_by_ext
 b	rgw_tools_cleanup
-
 b RGWPutObj_ObjStore_SWIFT::get_params
 ```
-
-
 
 ## MIME是什么
 
 ### 参考
 
 1. https://blog.csdn.net/jmjhx/article/details/99728680
-
-
 
 MIME-type和Content-Type的关系：
 当web服务器收到静态的资源文件请求时，依据请求文件的后缀名在服务器的MIME配置文件中找到对应的MIME Type，再根据MIME Type设置HTTP Response的Content-Type，然后浏览器根据Content-Type的值处理文件。
@@ -39,7 +35,7 @@ MIME-type和Content-Type的关系：
 
 ## swift中mime使用方法
 
-### 配置
+### 配置（自有）
 
 ```shell
 Option("rgw_mime_types_file", Option::TYPE_STR, Option::LEVEL_BASIC)
@@ -51,32 +47,127 @@ Option("rgw_mime_types_file", Option::TYPE_STR, Option::LEVEL_BASIC)
         "a content type to the object."),
 ```
 
-### 流程
+### 流程分析
 
-对于没有带`RGW_ATTR_CONTENT_TYPE`的，首先在`s->`object.name`中做拆分，检查其后缀来获得Content-Type。
+#### PutObj:
 
-若有后缀，则拆分出来，调用`rgw_find_mime_by_ext`来获得Content-Type。
+对于PutObj请求，若header中没有携带Content-Type信息，将尝试根据对象名称后缀来判断，
 
-若没有后缀，则该步骤跳过：
+若有后缀，则拆分出来，调用`rgw_find_mime_by_ext`来获得Content-Type，获得后写入RGW_ATTR_CONTENT_TYPE中。
+
+若没有后缀，则
 
 ```c++
-int RGWPutObj_ObjStore_SWIFT::get_params()
-{
-    ...
-    if (!s->generic_attrs.count(RGW_ATTR_CONTENT_TYPE)) {
-    ldout(s->cct, 5) << "content type wasn't provided, trying to guess" << dendl;
-    const char *suffix = strrchr(s->object.name.c_str(), '.');
-    if (suffix) {
-      suffix++;
-      if (*suffix) {
-	string suffix_str(suffix);
-	const char *mime = rgw_find_mime_by_ext(suffix_str);
-	if (mime) {
-	  s->generic_attrs[RGW_ATTR_CONTENT_TYPE] = mime;
-	}
-    ...
-    
+#PutObj
+process_request
+rgw_process_authenticated
+RGWPutObj_ObjStore_SWIFT::verify_permission
+RGWPutObj::verify_permission
+RGWPutObj_ObjStore_SWIFT::get_params
+ |--> rgw_find_mime_by_ext(suffix_str)
+ |--> s->generic_attrs[RGW_ATTR_CONTENT_TYPE] = mime
+RGWPutObj::execute
+ |--> rgw::putobj::AtomicObjectProcessor::complete
+ |--> RGWRados::Object::Write::write_meta
+ |--> RGWRados::Object::Write::_do_write_meta
+    |--> content_type = rgw_bl_str(bl);
+ |--> RGWRados::Bucket::UpdateIndex::complete(...,content_type,...)
+    |--> get_bucket_shard(&bs);
+    |--> ent.meta.content_type = content_type;
+    |--> store->cls_obj_complete_add(*bs, obj, optag, poolid, epoch, ent, category, remove_objs, bilog_flags, zones_trace);
+    |--> RGWRados::cls_obj_complete_op
+    |--> cls_rgw_bucket_complete_op
+    |--> librados::v14_2_0::ObjectOperation::exec
+    |--> ObjectOperation::call
+    |--> ObjectOperation::add_call
+      |--> OSDOp& osd_op = add_op(op);
+    |--> librados::AioCompletion *completion = arg->rados_completion;
+    |-->  bs.index_ctx.aio_operate(bs.bucket_obj, arg->rados_completion, &o);
+    |--> librados::v14_2_0::IoCtx::aio_operate
+    	|--> librados::IoCtxImpl::queue_aio_write(AioCompletionImpl *c)
+    	|--> objecter->prepare_mutate_op
+    	|--> objecter->op_submit(op, &c->tid);
+    	
+RGWOp::complete
+RGWPutObj_ObjStore_SWIFT::send_response
+  |--> end_header
+	   |--> force_content_type
 ```
+
+其中`force_content_type`是为了SWIFT特殊的处理，S3可能不需要：
+
+https://github.com/ceph/ceph/commit/106aeba206736d4080326f9bc191876bed63370b
+
+https://github.com/ceph/ceph/commit/423cf136f15df3099c9266f55932542d303c2713
+
+
+
+#### GetObj:
+
+```c++
+#GetObj
+process_request
+rgw_process_authenticated
+RGWGetObj::execute
+RGWGetObj_ObjStore_SWIFT::send_response_data
+  --> get_contype_from_attrs(attrs, content_type) //从 RGW_ATTR_CONTENT_TYPE 获取
+  --> end_header(s, this, !content_type.empty() ? content_type.c_str()
+	     : "binary/octet-stream"); //若获取到的content_type为空，则设定为binary/octet-stream
+```
+
+#### CopyObj:
+
+```c++
+process_request
+rgw_process_authenticated
+RGWOp::complete
+RGWCopyObj_ObjStore_SWIFT::send_response
+  |--> get_contype_from_attrs(attrs, content_type);
+  |--> end_header(s, this, !content_type.empty() ? content_type.c_str()
+	       : "binary/octet-stream");
+```
+
+
+
+## 目前S3中通过header设置content-type流程
+
+### PutObj
+
+> 以`aws s3api put-object --bucket $BUCKET --key $OBJECT --content-type text/plain`为例：
+
+```c++
+process_request
+RGWREST::get_handler
+RGWREST::preprocess
+  |--> s->generic_attrs[giter->second] = env;//将s->info->env中的header存入
+  |--> //eg: ["user.rgw.content_type"] = "text/plain" //CONTENT_TYPE
+
+rgw_process_authenticated
+RGWPutObj::execute
+populate_with_generic_attrs(s, attrs)//将generic_attrs中的content_type写出到attrs
+rgw::putobj::AtomicObjectProcessor::complete
+RGWRados::Object::Write::write_meta
+RGWRados::Object::Write::_do_write_meta
+	|--> if(name.compare(RGW_ATTR_CONTENT_TYPE) == 0)
+  |--> content_type = rgw_bl_str(bl);
+```
+
+### GetObj
+
+```c++
+process_request
+rgw_process_authenticated
+RGWGetObj::execute
+RGWGetObj_ObjStore_S3::send_response_data
+  |-->if (iter->first.compare(RGW_ATTR_CONTENT_TYPE) == 0)
+  |-->  if (!content_type) {                                                                                                             
+  |-->  content_type_str = rgw_bl_str(iter->second);  
+  |-->  content_type = content_type_str.c_str(); 
+```
+
+## 修改点
+
+在RGW
 
 
 
