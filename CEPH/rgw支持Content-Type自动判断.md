@@ -170,7 +170,31 @@ RGWGetObj_ObjStore_S3::send_response_data
 
 ## 修改点
 
-在RGW中
+在RGWPutObj_ObjStore_S3::get_params()中，添加：
+
+```c++
+if (!s->generic_attrs.count(RGW_ATTR_CONTENT_TYPE)) {
+    ldout(s->cct, 5) << "content type wasn't provided, trying to guess" << dendl;
+    const char *suffix = strrchr(s->object.name.c_str(), '.');
+    if (suffix) {
+        suffix++;
+        if (*suffix) {
+            string suffix_str(suffix);
+            const char *mime = rgw_find_mime_by_ext(suffix_str);
+            if (mime) {
+                s->generic_attrs[RGW_ATTR_CONTENT_TYPE] = mime;
+            }
+        }
+    }
+}
+```
+
+## 自测
+
+### 自测场景
+
+1. header中指定content-type时，不去guess type，以header中指定的为准。
+2. header中未指定content-type时，从object名称后缀中解析，在mime.types中做匹配。若能匹配，则加入attrs中；若不能匹配，则什么保持为空。
 
 ## 附录
 
@@ -309,6 +333,50 @@ $12 = std::map with 7 elements = {
   ["HTTP_X_ROBOTS_TAG"] = "user.rgw.x-robots-tag"
 }
 ```
+
+实现方式：
+
+```c++
+/*
+ * mapping between rgw object attrs and output http fields
+ */
+static const struct rgw_http_attr base_rgw_to_http_attrs[] = {
+  { RGW_ATTR_CONTENT_LANG,      "Content-Language" },
+  { RGW_ATTR_EXPIRES,           "Expires" },
+  { RGW_ATTR_CACHE_CONTROL,     "Cache-Control" },
+  { RGW_ATTR_CONTENT_DISP,      "Content-Disposition" },
+  { RGW_ATTR_CONTENT_ENC,       "Content-Encoding" },
+  { RGW_ATTR_USER_MANIFEST,     "X-Object-Manifest" },
+  { RGW_ATTR_X_ROBOTS_TAG ,     "X-Robots-Tag" },
+  { RGW_ATTR_STORAGE_CLASS ,    "X-Amz-Storage-Class" },
+  /* RGW_ATTR_AMZ_WEBSITE_REDIRECT_LOCATION header depends on access mode:
+   * S3 endpoint: x-amz-website-redirect-location
+   * S3Website endpoint: Location
+   */
+  { RGW_ATTR_AMZ_WEBSITE_REDIRECT_LOCATION, "x-amz-website-redirect-location" },
+};
+
+static const struct generic_attr generic_attrs[] = {
+  { "CONTENT_TYPE",             RGW_ATTR_CONTENT_TYPE },
+  { "HTTP_CONTENT_LANGUAGE",    RGW_ATTR_CONTENT_LANG },
+  { "HTTP_EXPIRES",             RGW_ATTR_EXPIRES },
+  { "HTTP_CACHE_CONTROL",       RGW_ATTR_CACHE_CONTROL },
+  { "HTTP_CONTENT_DISPOSITION", RGW_ATTR_CONTENT_DISP },
+  { "HTTP_CONTENT_ENCODING",    RGW_ATTR_CONTENT_ENC },
+  { "HTTP_X_ROBOTS_TAG",        RGW_ATTR_X_ROBOTS_TAG },
+};
+
+struct generic_attr {
+  const char *http_header;
+  const char *rgw_attr;
+};
+
+map<string, string> rgw_to_http_attrs;
+static map<string, string> generic_attrs_map;
+map<int, const char *> http_status_names;
+```
+
+
 
 generic_attrs中的key则是user.rgw.xxx形式的：
 
