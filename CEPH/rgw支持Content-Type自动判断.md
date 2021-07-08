@@ -7,20 +7,9 @@
 RGW_ATTR_CONTENT_TYPE
 ```
 
-gdb:
-
-```shell
-b	rgw_tools_init
-b	rgw_find_mime_by_ext
-b	rgw_tools_cleanup
-b RGWPutObj_ObjStore_SWIFT::get_params
-```
-
 ## MIME是什么
 
-**参考**
-
-1. https://blog.csdn.net/jmjhx/article/details/99728680
+**参考**：https://blog.csdn.net/jmjhx/article/details/99728680
 
 MIME-type和Content-Type的关系：
 当web服务器收到静态的资源文件请求时，依据请求文件的后缀名在服务器的MIME配置文件中找到对应的MIME Type，再根据MIME Type设置HTTP Response的Content-Type，然后浏览器根据Content-Type的值处理文件。
@@ -29,6 +18,7 @@ MIME-type和Content-Type的关系：
 为什么这么说呢？首先，我们要了解浏览器是如何处理内容的。在浏览器中显示的内容有 HTML、有 XML、有 GIF、还有 Flash ...
 那么，浏览器是如何区分它们，绝对什么内容用什么形式来显示呢？答案是 MIME Type，也就是该资源的媒体类型。
 媒体类型通常是通过 HTTP 协议，由 Web 服务器告知浏览器的，更准确地说，是通过 Content-Type 来表示的，例如:
+
 `Content-Type: text/HTML`
 表示内容是 text/HTML 类型，也就是超文本文件。为什么是“text/HTML”而不是“HTML/text”或者别的什么？MIME Type 不是个人指定的，是经过 ietf 组织协商，以 RFC 的形式作为建议的标准发布在网上的，大多数的 Web 服务器和用户代理都会支持这个规范 (顺便说一句，Email 附件的类型也是通过 MIME Type 指定的)。
 通常只有一些在互联网上获得广泛应用的格式才会获得一个 MIME Type，如果是某个客户端自己定义的格式，一般只能以 application/x- 开头。
@@ -44,7 +34,7 @@ Option("rgw_mime_types_file", Option::TYPE_STR, Option::LEVEL_BASIC)
     .set_long_description("The mime types file is needed in Swift when uploading an object. If object's content type is not specified, RGW will use data from this file to assign a content type to the object."),
 ```
 
-该文件定义了众多Content-Type的map。在rgw启动时，`rgw_main.cc, main()`下，通过`rgw_tools_init`从文件读取到`ext_mime_map`中，以供后面使用。
+该文件定义了众多Content-Type的map。在rgw启动时，`rgw_main.cc, main()`下，通过`rgw_tools_init`从文件读取到`ext_mime_map`中，以供rgw使用。
 
 ### 流程分析
 
@@ -54,7 +44,25 @@ Option("rgw_mime_types_file", Option::TYPE_STR, Option::LEVEL_BASIC)
 
 若有后缀，则拆分出来，调用`rgw_find_mime_by_ext`来获得Content-Type，获得后写入RGW_ATTR_CONTENT_TYPE中。
 
-若没有后缀，则
+若没有后缀，则考虑根据s->format强制设置一个type。
+
+> 此处的s->format一般是特定的Handler来显式指定的，例如：
+>
+> `RGWHandler_REST_S3::init_from_header(s,RGW_FORMAT_XML, true);`
+>
+> 默认为`RGW_FORMAT_PLAIN`。
+
+其中`force_content_type`是为了Swift协议中规定即使不包含body也要返回Content-Type header,例如[openstack:put object in swift](https://docs.openstack.org/api-ref/object-store/index.html?expanded=create-or-replace-object-detail#create-or-replace-object)（对比Request和Respond，可以发现Request中Content-Type是optional，而Respond中确要求必须包含，这一点也可以在附录Swift和S3下PutObject抓包看到）。S3应该不需要[S3:put object](https://docs.aws.amazon.com/AmazonS3/latest/API/API_PutObject.html)：
+
+> ```
+> Swift sends Content-Type HTTP header even if the response
+> doesn't contain body. We have this behaviour implemented
+> until applying some changes in end_header() function.
+> ```
+
+[rgw: enforce Content-Type in Swift responses.](https://github.com/ceph/ceph/commit/106aeba206736d4080326f9bc191876bed63370b)
+
+[rgw: we should not overide Swift sent content type](https://github.com/ceph/ceph/commit/423cf136f15df3099c9266f55932542d303c2713)
 
 ```c++
 #PutObj
@@ -93,18 +101,6 @@ RGWPutObj_ObjStore_SWIFT::send_response
 	   |--> force_content_type
 ```
 
-其中`force_content_type`是为了Swift协议中规定即使不包含body也要返回Content-Type header,例如[put object in swift](https://docs.openstack.org/api-ref/object-store/index.html?expanded=create-or-replace-object-detail#create-or-replace-object)（对比Request和Respond，可以发现Request中Content-Type是optional，而Respond中确要求必须包含，这一点也可以在附录Swift和S3下PutObject抓包看到）。S3应该不需要：
-
-> ```
-> Swift sends Content-Type HTTP header even if the response
-> doesn't contain body. We have this behaviour implemented
-> until applying some changes in end_header() function.
-> ```
-
-[rgw: enforce Content-Type in Swift responses.](https://github.com/ceph/ceph/commit/106aeba206736d4080326f9bc191876bed63370b)
-
-[rgw: we should not overide Swift sent content type](https://github.com/ceph/ceph/commit/423cf136f15df3099c9266f55932542d303c2713)
-
 #### GetObj:
 
 ```c++
@@ -129,8 +125,6 @@ RGWCopyObj_ObjStore_SWIFT::send_response
   |--> end_header(s, this, !content_type.empty() ? content_type.c_str()
 	       : "binary/octet-stream");
 ```
-
-
 
 ## S3中通过header设置Content-Type
 
@@ -193,12 +187,203 @@ if (!s->generic_attrs.count(RGW_ATTR_CONTENT_TYPE)) {
 
 ### 自测场景
 
-1. header中指定content-type时，不去guess type，以header中指定的为准。
-2. header中未指定content-type时，从object名称后缀中解析，在mime.types中做匹配。若能匹配，则加入attrs中；若不能匹配，则什么保持为空。
+1. put-object时，若header中指定content-type，则不去guess type，以header中指定的为准(即使该值不属于MIME标准)。
+2. put-object时，若header中未指定content-type，则从object名称后缀中解析，在mime.types中做匹配。若能匹配，则加入attrs中；若不能匹配，则不加入attrs中，并在send_response时保持为默认值`binary/octet-stream`。
+
+### 测试脚本
+
+```shell
+#!/bin/bash
+
+PROFILE="Vstart_testid"
+S3_HOST="http://x.x.x.x:8000"
+
+function list_buckets(){
+    aws s3api --endpoint-url "$S3_HOST" --profile $PROFILE list-buckets
+}
+
+function create_bucket(){
+    aws s3api --endpoint-url "$S3_HOST" --profile $PROFILE create-bucket --bucket "$1"
+}
+
+function put_object(){
+    aws s3api --endpoint-url "$S3_HOST" --profile $PROFILE put-object --bucket "$1" --key "$2" --body "$2"
+}
+
+function put_object_with_content_type_header(){
+    aws s3api --endpoint-url "$S3_HOST" --profile $PROFILE put-object --bucket "$1" --key "$2" --body "$2" --content-type "$3"
+}
+
+function get_object(){
+    aws s3api --endpoint-url $S3_HOST --profile $PROFILE \
+        get-object --bucket "$1" \
+                   --key "$2" \
+                   "$2".down 
+}
+
+function test_put_object_no_suffix_no_header(){
+    echo "#1.test_put_object_no_suffix_no_header"
+    put_object bucket0 object0
+    get_object bucket0 object0
+}
+
+function test_put_object_with_suffix_no_header(){
+    echo "#2.test_put_object_with_suffix_no_header"
+    touch object0.bmp
+    echo "object0.bmp~~" > object0.bmp
+    put_object bucket0 object0.bmp
+    get_object bucket0 object0.bmp
+}
+
+function test_put_object_no_suffix_with_header(){
+    echo "#3.test_put_object_no_suffix_with_header"
+    touch "object0"
+    echo "object0" > object0
+    put_object_with_content_type_header bucket0 object0 "image/bmp"
+    get_object bucket0 object0
+}
+
+function test_put_object_no_suffix_with_wrong_header(){
+    echo "#4.test_put_object_no_suffix_with_wrong_header"
+    touch "object0"
+    echo "object0" > object0
+    put_object_with_content_type_header bucket0 object0 "wrong/mime"
+    get_object bucket0 object0
+}
+
+function test_put_object_with_suffix_with_wrong_header(){
+    echo "#5.test_put_object_with_suffix_with_wrong_header"
+    touch object0.bmp
+    echo "object0.bmp~~" > object0.bmp
+    put_object_with_content_type_header bucket0 object0.bmp "wrong/mime"
+    get_object bucket0 object0.bmp
+}
+
+function test_put_object_with_suffix_with_diff_header(){
+    echo "#6.test_put_object_with_suffix_with_diff_header"
+    touch object0.txt 
+    echo "object0.txt~~~" > object0.txt
+    put_object_with_content_type_header bucket0 object0.txt "image/bmp"
+    get_object bucket0 object0.txt
+}
+
+function test_put_object_with_wrong_suffix_no_header(){
+    echo "#7.test_put_object_with_wrong_suffix_no_header"
+    touch object0.wrong_suffix 
+    echo "object0.wrong_suffix~~~" > object0.wrong_suffix
+    put_object bucket0 object0.wrong_suffix
+    get_object bucket0 object0.wrong_suffix
+}
+
+function main(){
+    create_bucket bucket0
+    test_put_object_no_suffix_no_header
+    test_put_object_with_suffix_no_header
+    test_put_object_no_suffix_with_header
+    test_put_object_no_suffix_with_wrong_header
+    test_put_object_with_suffix_with_wrong_header
+    test_put_object_with_suffix_with_diff_header
+    test_put_object_with_wrong_suffix_no_header
+}
+main
+```
+
+### 测试结果
+
+```shell
+#1.test_put_object_no_suffix_no_header
+{
+    "ETag": "\"197d6057db574d459936284126bca77a\""
+}
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-08T03:48:36+00:00",
+    "ContentLength": 8,
+    "ETag": "\"197d6057db574d459936284126bca77a\"",
+    "ContentType": "binary/octet-stream",
+    "Metadata": {}
+}
+#2.test_put_object_with_suffix_no_header
+{
+    "ETag": "\"a32784e9abb495e3febace244fa824f1\""
+}
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-08T03:48:42+00:00",
+    "ContentLength": 14,
+    "ETag": "\"a32784e9abb495e3febace244fa824f1\"",
+    "ContentType": "image/bmp",
+    "Metadata": {}
+}
+#3.test_put_object_no_suffix_with_header
+{
+    "ETag": "\"197d6057db574d459936284126bca77a\""
+}
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-08T03:48:48+00:00",
+    "ContentLength": 8,
+    "ETag": "\"197d6057db574d459936284126bca77a\"",
+    "ContentType": "image/bmp",
+    "Metadata": {}
+}
+#4.test_put_object_no_suffix_with_wrong_header
+{
+    "ETag": "\"197d6057db574d459936284126bca77a\""
+}
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-08T03:48:53+00:00",
+    "ContentLength": 8,
+    "ETag": "\"197d6057db574d459936284126bca77a\"",
+    "ContentType": "wrong/mime",
+    "Metadata": {}
+}
+#5.test_put_object_with_suffix_with_wrong_header
+{
+    "ETag": "\"a32784e9abb495e3febace244fa824f1\""
+}
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-08T03:48:59+00:00",
+    "ContentLength": 14,
+    "ETag": "\"a32784e9abb495e3febace244fa824f1\"",
+    "ContentType": "wrong/mime",
+    "Metadata": {}
+}
+#6.test_put_object_with_suffix_with_diff_header
+{
+    "ETag": "\"410291211bd15062b265ae9b17cac13f\""
+}
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-08T03:49:05+00:00",
+    "ContentLength": 15,
+    "ETag": "\"410291211bd15062b265ae9b17cac13f\"",
+    "ContentType": "image/bmp",
+    "Metadata": {}
+}
+#7.test_put_object_with_wrong_suffix_no_header
+{
+    "ETag": "\"53016300384f9edfbf8c6f4e21d8faf3\""
+}
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-08T03:49:11+00:00",
+    "ContentLength": 24,
+    "ETag": "\"53016300384f9edfbf8c6f4e21d8faf3\"",
+    "ContentType": "binary/octet-stream",
+    "Metadata": {}
+}
+```
 
 ## 附录
 
-### swift put obj时抓包
+### swift在没有body时也强制返回content-type
+
+> S3无此要求。
+
+#### swift put obj抓包
 
 ```shell
 #不指定后缀
@@ -275,7 +460,7 @@ Date: Wed, 07 Jul 2021 00:10:38 GMT
 Connection: Keep-Alive
 ```
 
-### s3 put obj 抓包
+#### s3 put obj 抓包
 
 ```shell
 PUT /bucket0/object0 HTTP/1.1
@@ -319,7 +504,7 @@ Connection: Keep-Alive
 
 `RGW_ATTR_CONTENT_TYPE`如何和`user.rgw.content_type`建立联系？
 
-解决：generic_attrs_map中定义了header和attrs名称的映射：
+generic_attrs_map中定义了header和attrs名称的映射：
 
 ```c++
 (gdb) p	generic_attrs_map
@@ -376,8 +561,6 @@ static map<string, string> generic_attrs_map;
 map<int, const char *> http_status_names;
 ```
 
-
-
 generic_attrs中的key则是user.rgw.xxx形式的：
 
 ```shell
@@ -394,8 +577,6 @@ $9 = {
 #define RGW_ATTR_PREFIX  "user.rgw."
 #define RGW_ATTR_CONTENT_TYPE	RGW_ATTR_PREFIX "content_type"
 ```
-
-因此问题解决。
 
 ## 路线
 
