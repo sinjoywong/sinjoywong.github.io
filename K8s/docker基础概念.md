@@ -8,7 +8,7 @@
 
 《第一本docker书》
 
-
+[浅谈docker中镜像和容器在本地的存储](https://zhuanlan.zhihu.com/p/95900321)
 
 ## 问题积累
 
@@ -38,6 +38,10 @@ Docker将这样的文件系统称为镜像。一个镜像可以放到另一个�
 当Docker第一次启动一个容器时，初始的读写层是空的。当文件系统发生变化时，这些变化都会应用到这一层上。比如，如果想修改一个文件，这个文件首先会从该读写层下面的只读层复制到该读写层。该文件的只读版本依然存在，但是已经被读写层中的该文件副本所隐藏。
 
 通常这种机制被称为写时复制（copy on write），这也是使Docker如此强大的技术之一。每个只读镜像层都是只读的，并且以后永远不会变化。当创建一个新容器时，Docker会构建出一个镜像栈，并在栈的最顶端添加一个读写层。这个读写层再加上其下面的镜像层以及一些配置数据，就构成了一个容器。在上一章我们已经知道，容器是可以修改的，它们都有自己的状态，并且是可以启动和停止的。容器的这种特点加上镜像分层框架（image-layering framework），使我们可以快速构建镜像并运行包含我们自己的应用程序和服务的容器。
+
+容器化基本过程：
+
+<img src=".docker%E5%9F%BA%E7%A1%80%E6%A6%82%E5%BF%B5.assets/image-20210714113644391.png" alt="image-20210714113644391" style="zoom: 25%;" />
 
 ### 构建镜像
 
@@ -208,6 +212,8 @@ WORKDIR:
 
 可以通过`-w` 标志在运行时覆盖工作目录，如代码清单4-57所示。
 
+> 其中`-it` 参数告诉Docker开启容器的交互模式并将读者当前的Shell连接到容器终端（在容器章节中会详细介绍）
+
 ```shell
 $ sudo docker run -ti -w /var/log ubuntu pwd　
 /var/log
@@ -246,6 +252,28 @@ VOLUME ["/opt/project"]
 ```
 
 > `docker cp` 是和`VOLUME` 指令相关并且也是很实用的命令。该命令允许从容器复制文件和复制文件到容器上。可以从Docker命令行文档（https://docs.docker.com/engine/reference/ commandline/cp/ ）中获得更多信息。
+
+
+
+卷在Docker里非常重要，也很有用。卷是在一个或者多个容器内被选定的目录，可以绕过分层的联合文件系统（Union File System），为Docker提供持久数据或者共享数据。这意味着对卷的修改会直接生效，并绕过镜像。当提交或者创建镜像时，卷不被包含在镜像里。
+
+```shell
+$ sudo docker run -d -p 80 --name website \
+-v $PWD/website:/var/www/html/website \
+jamtur01/nginx nginx
+```
+
+
+
+- 希望同时对代码做开发和测试；
+- 代码改动很频繁，不想在开发过程中重构镜像；
+- 希望在多个容器间共享代码。
+
+`-v选项通过` 指定一个目录或者登上与容器上与该目录分离的本地宿主机来工作，这两个目录用`:` 分隔。如果容器目录不存在，Docker会自动创建一个。
+
+
+
+
 
 ADD:
 
@@ -296,4 +324,95 @@ COPY conf.d/ /etc/apache2/
 如果源路径是一个目录，那么这个目录将整个被复制到容器中，包括文件系统元数据；如果源文件为任何类型的文件，则该文件会随同元数据一起被复制。在这个例子里，源路径以`/` 结尾，所以Docker会认为它是目录，并将它复制到目的目录中。
 
 如果目的位置不存在，Docker将会自动创建所有需要的目录结构，就像`mkdir -p` 命令那样。
+
+### 容器的生命周期
+
+示例中使用`docker container run`来启动容器，这也是启动新容器的标准命令。命令中使用了`-it` 参数使容器具备交互性并与终端进行连接。
+
+```shell
+$ docker container run -it ubuntu:latest /bin/bash
+Unable to find image 'ubuntu:latest' locally
+latest: Pulling from library/ubuntu
+952132ac251a: Pull complete
+82659f8f1b76:  Pull complete
+c19118ca682d:  Pull complete
+8296858250fe:  Pull complete
+24e0251a0e2c:  Pull complete
+Digest: sha256:f4691c96e6bbaa99d9...e95a60369c506dd6e6f6ab
+Status: Downloaded newer image for
+
+ ubuntu:latest
+root@3027eb644874:/#
+```
+
+启动Ubuntu容器之时，让容器运行Bash Shell（`/bin/bash` ）。这使得Bash Shell成为**容器中运行的且唯一运行的进程** 。读者可以通过`ps -elf` 命令在容器内部查看。
+
+这意味着如果通过输入exit退出Bash Shell，那么容器也会退出（终止）。原因是容器如果不运行任何进程则无法存在——杀死Bash Shell即杀死了容器唯一运行的进程，导致这个容器也被杀死。这对于Windows容器来说也是一样的——**杀死容器中的主进程，则容器也会被杀死** 。
+
+按下`Ctrl-PQ` 组合键则会退出容器但并不终止容器运行。这样做会切回到Docker主机的Shell，并保持容器在后台运行。可以使用`docker container ls` 命令来观察当前系统正在运行的容器列表。
+
+当前容器仍然在运行，并且可以通过`docker container exec` 命令将终端重新连接到Docker，理解这一点很重要。
+
+```
+$ docker container exec -it 3027eb644874 bash
+root@3027eb644874:/#
+```
+
+正如读者所见，Shell提示符切换到了容器。如果读者再次运行`ps` 命令，会看到两个Bash或者PowerShell进程，这是因为`docker container exec` 命令创建了新的Bash或者PowerShell进程并且连接到容器。这意味着在当前Shell输入`exit` 并不会导致容器终止，因为原Bash或者PowerShell进程还在运行当中。
+
+输入exit退出容器，并通过命令`docker container ps` 来确认容器依然在运行中。果然容器还在运行。
+
+如果在自己的Docker主机上运行示例，则需要使用下面两个命令来停止并删除容器（读者需要将ID替换为自己容器的ID）。
+
+```
+$ docker container stop 3027eb64487
+3027eb64487
+
+$ docker container rm 3027eb64487
+3027eb64487
+
+```
+
+
+
+### 容器的卷与持久化
+
+在容器中持久化数据的方式推荐采用卷。
+
+总体来说，用户创建卷，然后创建容器，接着将卷挂载到容器上。卷会挂载到容器文件系统的某个目录之下，任何写到该目录下的内容都会写到卷中。即使容器被删除，卷与其上面的数据仍然存在
+
+如图13.1所示，Docker卷挂载到容器的`/code` 目录。任何写入`/code` 目录的数据都会保存到卷当中，并且在容器删除后依然存在。
+
+<img src=".docker%E5%9F%BA%E7%A1%80%E6%A6%82%E5%BF%B5.assets/image-20210714115123630.png" alt="image-20210714115123630" style="zoom:50%;" />
+
+`/code` 目录是一个Docker卷。容器其他目录均使用临时的本地存储。卷与目录`/code` 之间采用带箭头的虚线连接，这是为了表明卷与容器是非耦合的关系。
+
+默认情况下，Docker创建新卷时采用内置的`local` 驱动。恰如其名，本地卷只能被所在节点的容器使用。使用`-d` 参数可以指定不同的驱动。
+
+> 第三方驱动可以通过插件方式接入。这些驱动提供了高级存储特性，并为Docker集成了外部存储系统。
+
+使用`local` 驱动创建的卷在Docker主机上均有其专属目录，在Linux中位于`/var/lib/docker/volumes` 目录下。
+
+这意味着可以在Docker主机文件系统中查看卷，甚至在Docker主机中对其进行读取数据或者写入数据操作。在第9章中就有一个示例——复制某个文件到Docker主机的卷目录下，在容器该卷中立刻就能看到对应的文件。
+
+读者可以在Docker服务以及容器中使用`myvol` 卷了。例如，可以在`docker container run` 命令后增加参数`--flag` 将卷挂载到新建容器中。稍后通过几个例子进行说明。
+
+```shell
+[root@VM-0-2-centos website]# docker container  run -idt --name voltainer --mount source=bizvol,target=/vol ubuntu
+
+[root@VM-0-2-centos website]# docker container exec -it voltainer sh
+
+# df -h
+Filesystem      Size  Used Avail Use% Mounted on
+overlay          50G   17G   31G  35% /
+tmpfs            64M     0   64M   0% /dev
+tmpfs           1.9G     0  1.9G   0% /sys/fs/cgroup
+shm              64M     0   64M   0% /dev/shm
+/dev/vda1        50G   17G   31G  35% /vol
+tmpfs           1.9G     0  1.9G   0% /proc/acpi
+tmpfs           1.9G     0  1.9G   0% /proc/scsi
+tmpfs           1.9G     0  1.9G   0% /sys/firmware
+```
+
+
 
