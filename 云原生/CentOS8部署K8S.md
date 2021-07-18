@@ -93,3 +93,7 @@ https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-clu
 重新初始化：
 kubeadm reset 
 kubeadm init --kubernetes-version=v1.11.2 --pod-network-cidr=10.244.0.0/16 --apiserver-advertise-address=192.168.11.90 --token-ttl 0
+
+kubeadm init --image-repository registry.aliyuncs.com/google_containers --kubernetes-version=v1.16.1 --pod-network-cidr=10.244.0.0/16 
+
+deployment, yaml: https://blog.csdn.net/DY1316434466/article/details/105440172
