@@ -5,14 +5,26 @@
 ## 考虑问题
 
 1. Docker和K8S有什么关系？为什么有了容器服务还发展出来K8S？K8S解决了什么问题？
+
 2. Pod、Deployment、Service、ConfigMap、Job之间的关系是什么？
+
 3. 如何进行配置的持久化？如何把配置传给Pod，Pod中的容器如何获取配置？配置如何更新？更新后如何生效给容器？
     1. configMap，环境变量
     2. configMap，挂载文件
 
-4. 如何拉起容器？rook是怎么动态做的？定制时在控制台里是否需要动态生成yaml文件并kubectl apply -f xx.yaml来拉起mon, osd, rgw的pod?
-5. mon, osd, rgw各个pod之间如何通信？osd获取的网卡IP是什么？是否需要手动去写ceph.conf中的cluster ip？
-6. 
+4. 如何在容器内获取Pod信息？
+
+    Downward API，通过环境变量和Volume挂载两种方式挂载到容器内部。
+
+    作用：
+
+    > eg: Pod的IP，名称，所在Namespace，资源信息（requests.cpu容器的CPU请求值, requests.memory容器的内存请求值, limits.cpu容器的CPU限制值, limits.memory容器的内存限制值）
+
+5. 如何拉起容器？rook是怎么动态做的？定制时在控制台里是否需要动态生成yaml文件并kubectl apply -f xx.yaml来拉起mon, osd, rgw的pod?
+
+6. mon, osd, rgw各个pod之间如何通信？osd获取的网卡IP是什么？是否需要手动去写ceph.conf中的cluster ip？
+
+7. 
 
 ## 参考
 
