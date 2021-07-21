@@ -8,9 +8,9 @@
 
 [自定义K8s Operator](https://www.qikqiak.com/post/k8s-operator-101/)
 
+https://www.cnblogs.com/deny/p/14235814.html
 
-
-[![img](https://01.org/sites/default/files/resize/users/u25390/intro-to-rook-ceph-ceph-cluster-maint-490x322.png)
+![img](https://01.org/sites/default/files/resize/users/u25390/intro-to-rook-ceph-ceph-cluster-maint-490x322.png)
 
 
 
@@ -33,8 +33,7 @@ mon:
 MON Pod的创建：
 
 ```go
-// Reconcile reads that state of the cluster for a CephCluster object and makes changes based on the state read
-// and what is in the cephCluster.Spec
+// Reconcile reads that state of the cluster for a CephCluster object and makes changes based on the state read and what is in the cephCluster.Spec
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileCephCluster) Reconcile(context context.Context, request reconcile.Request) (reconcile.Result, e
@@ -199,3 +198,45 @@ data:
 
 保存在哪里？在哪里定义？
 
+
+
+
+
+### Rook的定位
+
+从Rook的官方文档中看出，它的定位是Kubernetes上的存储提供框架，提供基于Kubernetes的多种存储部署，比如：Ceph，Minio，CockroachDB，Cassandra，NFS等。
+
+Ceph只是作为其第一个提供的beta版的存储方案。
+
+参考： [Storage Provider Framework](https://blog.rook.io/rook-v0-8-framework-for-storage-orchestrators-9421848505b3#866f)
+
+### Rook的优势
+
+1. 与Kubernetes集成，一键部署
+2. Rook支持通过yaml文件创建pool，cephfs，radosgw，监控等
+3. 简单扩容和小版本升级比较方便，kuberctl edit 即可
+
+### Rook的不足
+
+1. Rook项目时间还短，代码不够完善
+2. 不支持分区配置OSD，不能准确定制OSD的磁盘使用
+3. Rook可以一键删除Ceph pool / cephfs / radosgw和Ceph集群，没有确认，有些危险
+4. 基于容器化技术，Ceph的各个组件的IO栈又多了一层，性能会有所损耗
+5. Ceph运维增加了Kubernetes一层，对Ceph运维人员的知识栈要求又提高了
+
+### 使用场景总结
+
+所以总体来说如下：
+
+适合使用Rook的场景
+
+- POC环境，测试环境
+- Kubernetes + Ceph混合部署环境
+- 对Ceph性能没强要求环境
+- 不需要经常随社区升级Ceph版本的环境
+
+不适合使用Rook的场景
+
+- Ceph集群单独部署环境
+- Ceph性能强需求环境
+- 跟随Ceph社区升级版本的环境

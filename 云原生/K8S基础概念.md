@@ -2,6 +2,10 @@
 
 
 
+https://www.cnblogs.com/peng-zone/p/11739433.html
+
+![img](https://img2018.cnblogs.com/blog/1293010/201910/1293010-20191025180006356-639793413.png)
+
 ## 考虑问题
 
 1. Docker和K8S有什么关系？为什么有了容器服务还发展出来K8S？K8S解决了什么问题？

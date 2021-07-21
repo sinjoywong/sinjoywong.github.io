@@ -378,6 +378,128 @@ main
 }
 ```
 
+#### 分片上传测试
+
+
+
+```shell
+function test_put_object_multipart(){
+    echo "#0. test_put_object_multipart"
+    create_bucket bucket0
+    BIG_FILE="TESTFILE_10MB"
+    put_obj_multipart bucket0 $BIG_FILE
+    get_object bucket0 $BIG_FILE 
+    put_obj_multipart_with_content_type_header bucket0 $BIG_FILE "image/bmp"
+    get_object bucket0 $BIG_FILE 
+}
+```
+
+
+
+
+
+```shell
+#0. test_put_object_multipart
+Completed 256.0 KiB/9.2 MiB (1.2 MiB/s) with 1 file(s) remaining
+Completed 512.0 KiB/9.2 MiB (2.4 MiB/s) with 1 file(s) remaining
+Completed 768.0 KiB/9.2 MiB (3.5 MiB/s) with 1 file(s) remaining
+Completed 1.0 MiB/9.2 MiB (4.7 MiB/s) with 1 file(s) remaining  
+Completed 1.2 MiB/9.2 MiB (4.4 MiB/s) with 1 file(s) remaining  
+Completed 1.5 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
+Completed 1.8 MiB/9.2 MiB (6.1 MiB/s) with 1 file(s) remaining  
+Completed 2.0 MiB/9.2 MiB (6.9 MiB/s) with 1 file(s) remaining  
+Completed 2.2 MiB/9.2 MiB (7.8 MiB/s) with 1 file(s) remaining  
+Completed 2.5 MiB/9.2 MiB (4.1 MiB/s) with 1 file(s) remaining  
+Completed 2.8 MiB/9.2 MiB (4.5 MiB/s) with 1 file(s) remaining  
+Completed 3.0 MiB/9.2 MiB (4.3 MiB/s) with 1 file(s) remaining  
+Completed 3.2 MiB/9.2 MiB (4.7 MiB/s) with 1 file(s) remaining  
+Completed 3.5 MiB/9.2 MiB (4.7 MiB/s) with 1 file(s) remaining  
+Completed 3.8 MiB/9.2 MiB (5.1 MiB/s) with 1 file(s) remaining  
+Completed 4.0 MiB/9.2 MiB (5.1 MiB/s) with 1 file(s) remaining  
+Completed 4.2 MiB/9.2 MiB (5.4 MiB/s) with 1 file(s) remaining  
+Completed 4.5 MiB/9.2 MiB (5.7 MiB/s) with 1 file(s) remaining  
+Completed 4.7 MiB/9.2 MiB (5.8 MiB/s) with 1 file(s) remaining  
+Completed 5.0 MiB/9.2 MiB (5.6 MiB/s) with 1 file(s) remaining  
+Completed 5.2 MiB/9.2 MiB (5.9 MiB/s) with 1 file(s) remaining  
+Completed 5.5 MiB/9.2 MiB (6.2 MiB/s) with 1 file(s) remaining  
+Completed 5.7 MiB/9.2 MiB (4.6 MiB/s) with 1 file(s) remaining  
+Completed 6.0 MiB/9.2 MiB (4.8 MiB/s) with 1 file(s) remaining  
+Completed 6.2 MiB/9.2 MiB (4.9 MiB/s) with 1 file(s) remaining  
+Completed 6.5 MiB/9.2 MiB (5.1 MiB/s) with 1 file(s) remaining  
+Completed 6.7 MiB/9.2 MiB (5.3 MiB/s) with 1 file(s) remaining  
+Completed 7.0 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
+Completed 7.2 MiB/9.2 MiB (5.4 MiB/s) with 1 file(s) remaining  
+Completed 7.5 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
+Completed 7.7 MiB/9.2 MiB (5.4 MiB/s) with 1 file(s) remaining  
+Completed 8.0 MiB/9.2 MiB (5.6 MiB/s) with 1 file(s) remaining  
+Completed 8.2 MiB/9.2 MiB (5.5 MiB/s) with 1 file(s) remaining  
+Completed 8.5 MiB/9.2 MiB (5.7 MiB/s) with 1 file(s) remaining  
+Completed 8.7 MiB/9.2 MiB (5.7 MiB/s) with 1 file(s) remaining  
+Completed 9.0 MiB/9.2 MiB (5.8 MiB/s) with 1 file(s) remaining  
+Completed 9.2 MiB/9.2 MiB (6.0 MiB/s) with 1 file(s) remaining  
+upload: ./TESTFILE_10MB to s3://bucket0/TESTFILE_10MB           
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-20T12:14:41+00:00",
+    "ContentLength": 9684967,
+    "ETag": "\"8436ec3074b36db9257b0d12717910f3-2\"",
+    "ContentType": "binary/octet-stream",
+    "Metadata": {}
+}
+Completed 256.0 KiB/9.2 MiB (1.2 MiB/s) with 1 file(s) remaining
+Completed 512.0 KiB/9.2 MiB (2.4 MiB/s) with 1 file(s) remaining
+Completed 768.0 KiB/9.2 MiB (3.6 MiB/s) with 1 file(s) remaining
+Completed 1.0 MiB/9.2 MiB (4.8 MiB/s) with 1 file(s) remaining  
+Completed 1.2 MiB/9.2 MiB (4.5 MiB/s) with 1 file(s) remaining  
+Completed 1.5 MiB/9.2 MiB (5.4 MiB/s) with 1 file(s) remaining  
+Completed 1.8 MiB/9.2 MiB (6.2 MiB/s) with 1 file(s) remaining  
+Completed 2.0 MiB/9.2 MiB (7.1 MiB/s) with 1 file(s) remaining  
+Completed 2.2 MiB/9.2 MiB (7.9 MiB/s) with 1 file(s) remaining  
+Completed 2.5 MiB/9.2 MiB (4.3 MiB/s) with 1 file(s) remaining  
+Completed 2.8 MiB/9.2 MiB (4.8 MiB/s) with 1 file(s) remaining  
+Completed 3.0 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
+Completed 3.2 MiB/9.2 MiB (4.9 MiB/s) with 1 file(s) remaining  
+Completed 3.5 MiB/9.2 MiB (5.3 MiB/s) with 1 file(s) remaining  
+Completed 3.7 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
+Completed 4.0 MiB/9.2 MiB (5.5 MiB/s) with 1 file(s) remaining  
+Completed 4.2 MiB/9.2 MiB (5.9 MiB/s) with 1 file(s) remaining  
+Completed 4.5 MiB/9.2 MiB (6.2 MiB/s) with 1 file(s) remaining  
+Completed 4.7 MiB/9.2 MiB (6.6 MiB/s) with 1 file(s) remaining  
+Completed 5.0 MiB/9.2 MiB (5.9 MiB/s) with 1 file(s) remaining  
+Completed 5.2 MiB/9.2 MiB (6.2 MiB/s) with 1 file(s) remaining  
+Completed 5.5 MiB/9.2 MiB (6.5 MiB/s) with 1 file(s) remaining  
+Completed 5.7 MiB/9.2 MiB (6.3 MiB/s) with 1 file(s) remaining  
+Completed 6.0 MiB/9.2 MiB (6.6 MiB/s) with 1 file(s) remaining  
+Completed 6.2 MiB/9.2 MiB (6.8 MiB/s) with 1 file(s) remaining  
+Completed 6.5 MiB/9.2 MiB (7.1 MiB/s) with 1 file(s) remaining  
+Completed 6.7 MiB/9.2 MiB (7.4 MiB/s) with 1 file(s) remaining  
+Completed 7.0 MiB/9.2 MiB (7.4 MiB/s) with 1 file(s) remaining  
+Completed 7.2 MiB/9.2 MiB (7.7 MiB/s) with 1 file(s) remaining  
+Completed 7.5 MiB/9.2 MiB (7.9 MiB/s) with 1 file(s) remaining  
+Completed 7.7 MiB/9.2 MiB (7.4 MiB/s) with 1 file(s) remaining  
+Completed 8.0 MiB/9.2 MiB (7.7 MiB/s) with 1 file(s) remaining  
+Completed 8.2 MiB/9.2 MiB (7.9 MiB/s) with 1 file(s) remaining  
+Completed 8.5 MiB/9.2 MiB (7.9 MiB/s) with 1 file(s) remaining  
+Completed 8.7 MiB/9.2 MiB (8.1 MiB/s) with 1 file(s) remaining  
+Completed 9.0 MiB/9.2 MiB (8.4 MiB/s) with 1 file(s) remaining  
+Completed 9.2 MiB/9.2 MiB (8.6 MiB/s) with 1 file(s) remaining  
+upload: ./TESTFILE_10MB to s3://bucket0/TESTFILE_10MB           
+{
+    "AcceptRanges": "bytes",
+    "LastModified": "2021-07-20T12:14:57+00:00",
+    "ContentLength": 9684967,
+    "ETag": "\"8436ec3074b36db9257b0d12717910f3-2\"",
+    "ContentType": "image/bmp",
+    "Metadata": {}
+}
+```
+
+
+
+
+
+
+
 ## 附录
 
 ### swift在没有body时也强制返回content-type
