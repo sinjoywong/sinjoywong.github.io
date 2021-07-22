@@ -57,8 +57,6 @@ typedef enum {
   OSD::_preboot
   ```
 
-  。
-
   - 调用`OSD::heartbeat` ，目的是确认容量状态，不会让一个已经标记了full状态的down osd进入boot流程。关于心跳检测可以参考我另外一片blog。
   - OSDMap相关的检测：
     - epoch是否为0
