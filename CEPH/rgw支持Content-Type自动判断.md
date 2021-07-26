@@ -137,7 +137,7 @@ RGWCopyObj_ObjStore_SWIFT::send_response
 process_request
 RGWREST::get_handler
 RGWREST::preprocess
-  |--> s->generic_attrs[giter->second] = env;//将s->info->env中的header存入
+  |--> s->generic_attrs[giter->second] = env;//将s->info->env中的header存入s->generic_attrs中
   //eg: ["user.rgw.content_type"] = "text/plain" //CONTENT_TYPE
 
 rgw_process_authenticated
@@ -380,118 +380,70 @@ main
 
 #### 分片上传测试
 
-
-
 ```shell
-function test_put_object_multipart(){
-    echo "#0. test_put_object_multipart"
-    create_bucket bucket0
-    BIG_FILE="TESTFILE_10MB"
-    put_obj_multipart bucket0 $BIG_FILE
-    get_object bucket0 $BIG_FILE 
-    put_obj_multipart_with_content_type_header bucket0 $BIG_FILE "image/bmp"
-    get_object bucket0 $BIG_FILE 
+function put_obj_multipart_init(){
+    aws s3api --endpoint-url "$S3_HOST" --profile $PROFILE \
+        create-multipart-upload --bucket "$1" --key "$2"
 }
-```
+
+function put_obj_multipart_put(){
+    aws s3api --endpoint-url "$S3_HOST" --profile $PROFILE \
+        upload-part --bucket "$1" --key "$2" --body "$2" --part-number 1 \
+          --upload-id "$3"
+}
+
+function put_obj_multipart_complete(){
+    aws s3api --endpoint-url "$S3_HOST" --profile $PROFILE \
+        complete-multipart-upload --bucket "$1" --key "$2" \
+        --upload-id "$3" \
+        --multipart-upload file://$4
+}
 
 
+function test_put_object_multipart_with_suffix(){
+    #cp TESTFILE_10MB TESTFILE_10MB.bmp
+    BUCKET=bucket0
+    OBJECT=TESTFILE_10MB.bmp
+    ETAGS_FILE=etags_$OBJECT.json
+    create_bucket $BUCKET
+    #delete_object $BUCKET $OBJECT
+    #put_obj_multipart_init $BUCKET $OBJECT
+    UPLOAD_ID="2~l3Qcij-Q2-rP1KgXjAVYLXbwkPerwqJ" 
+    put_obj_multipart_put $BUCKET $OBJECT $UPLOAD_ID
+    cat > $ETAGS_FILE << EOF
+{
+    "Parts": [
+      {
+        "ETag": "33eb432bf5c674ddfa18a9135c5aa473",
+        "PartNumber": 1
+      }
+    ]
+}
+EOF
+    put_obj_multipart_complete $BUCKET $OBJECT $UPLOAD_ID $ETAGS_FILE
+    #get_object $BUCKET $OBJECT
+    head_object $BUCKET $OBJECT
+}
 
-
-
-```shell
-#0. test_put_object_multipart
-Completed 256.0 KiB/9.2 MiB (1.2 MiB/s) with 1 file(s) remaining
-Completed 512.0 KiB/9.2 MiB (2.4 MiB/s) with 1 file(s) remaining
-Completed 768.0 KiB/9.2 MiB (3.5 MiB/s) with 1 file(s) remaining
-Completed 1.0 MiB/9.2 MiB (4.7 MiB/s) with 1 file(s) remaining  
-Completed 1.2 MiB/9.2 MiB (4.4 MiB/s) with 1 file(s) remaining  
-Completed 1.5 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
-Completed 1.8 MiB/9.2 MiB (6.1 MiB/s) with 1 file(s) remaining  
-Completed 2.0 MiB/9.2 MiB (6.9 MiB/s) with 1 file(s) remaining  
-Completed 2.2 MiB/9.2 MiB (7.8 MiB/s) with 1 file(s) remaining  
-Completed 2.5 MiB/9.2 MiB (4.1 MiB/s) with 1 file(s) remaining  
-Completed 2.8 MiB/9.2 MiB (4.5 MiB/s) with 1 file(s) remaining  
-Completed 3.0 MiB/9.2 MiB (4.3 MiB/s) with 1 file(s) remaining  
-Completed 3.2 MiB/9.2 MiB (4.7 MiB/s) with 1 file(s) remaining  
-Completed 3.5 MiB/9.2 MiB (4.7 MiB/s) with 1 file(s) remaining  
-Completed 3.8 MiB/9.2 MiB (5.1 MiB/s) with 1 file(s) remaining  
-Completed 4.0 MiB/9.2 MiB (5.1 MiB/s) with 1 file(s) remaining  
-Completed 4.2 MiB/9.2 MiB (5.4 MiB/s) with 1 file(s) remaining  
-Completed 4.5 MiB/9.2 MiB (5.7 MiB/s) with 1 file(s) remaining  
-Completed 4.7 MiB/9.2 MiB (5.8 MiB/s) with 1 file(s) remaining  
-Completed 5.0 MiB/9.2 MiB (5.6 MiB/s) with 1 file(s) remaining  
-Completed 5.2 MiB/9.2 MiB (5.9 MiB/s) with 1 file(s) remaining  
-Completed 5.5 MiB/9.2 MiB (6.2 MiB/s) with 1 file(s) remaining  
-Completed 5.7 MiB/9.2 MiB (4.6 MiB/s) with 1 file(s) remaining  
-Completed 6.0 MiB/9.2 MiB (4.8 MiB/s) with 1 file(s) remaining  
-Completed 6.2 MiB/9.2 MiB (4.9 MiB/s) with 1 file(s) remaining  
-Completed 6.5 MiB/9.2 MiB (5.1 MiB/s) with 1 file(s) remaining  
-Completed 6.7 MiB/9.2 MiB (5.3 MiB/s) with 1 file(s) remaining  
-Completed 7.0 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
-Completed 7.2 MiB/9.2 MiB (5.4 MiB/s) with 1 file(s) remaining  
-Completed 7.5 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
-Completed 7.7 MiB/9.2 MiB (5.4 MiB/s) with 1 file(s) remaining  
-Completed 8.0 MiB/9.2 MiB (5.6 MiB/s) with 1 file(s) remaining  
-Completed 8.2 MiB/9.2 MiB (5.5 MiB/s) with 1 file(s) remaining  
-Completed 8.5 MiB/9.2 MiB (5.7 MiB/s) with 1 file(s) remaining  
-Completed 8.7 MiB/9.2 MiB (5.7 MiB/s) with 1 file(s) remaining  
-Completed 9.0 MiB/9.2 MiB (5.8 MiB/s) with 1 file(s) remaining  
-Completed 9.2 MiB/9.2 MiB (6.0 MiB/s) with 1 file(s) remaining  
-upload: ./TESTFILE_10MB to s3://bucket0/TESTFILE_10MB           
+#测试结果
+{
+    "ETag": "\"33eb432bf5c674ddfa18a9135c5aa473\""
+}
+{
+    "Location": "http://9.134.3.72:8000/bucket0/TESTFILE_10MB.bmp",
+    "Bucket": "bucket0",
+    "Key": "TESTFILE_10MB.bmp",
+    "ETag": "\"b0e8646234deadafaacafb24b64891c6-1\""
+}
 {
     "AcceptRanges": "bytes",
-    "LastModified": "2021-07-20T12:14:41+00:00",
+    "LastModified": "2021-07-25T11:06:46+00:00",
     "ContentLength": 9684967,
-    "ETag": "\"8436ec3074b36db9257b0d12717910f3-2\"",
-    "ContentType": "binary/octet-stream",
-    "Metadata": {}
-}
-Completed 256.0 KiB/9.2 MiB (1.2 MiB/s) with 1 file(s) remaining
-Completed 512.0 KiB/9.2 MiB (2.4 MiB/s) with 1 file(s) remaining
-Completed 768.0 KiB/9.2 MiB (3.6 MiB/s) with 1 file(s) remaining
-Completed 1.0 MiB/9.2 MiB (4.8 MiB/s) with 1 file(s) remaining  
-Completed 1.2 MiB/9.2 MiB (4.5 MiB/s) with 1 file(s) remaining  
-Completed 1.5 MiB/9.2 MiB (5.4 MiB/s) with 1 file(s) remaining  
-Completed 1.8 MiB/9.2 MiB (6.2 MiB/s) with 1 file(s) remaining  
-Completed 2.0 MiB/9.2 MiB (7.1 MiB/s) with 1 file(s) remaining  
-Completed 2.2 MiB/9.2 MiB (7.9 MiB/s) with 1 file(s) remaining  
-Completed 2.5 MiB/9.2 MiB (4.3 MiB/s) with 1 file(s) remaining  
-Completed 2.8 MiB/9.2 MiB (4.8 MiB/s) with 1 file(s) remaining  
-Completed 3.0 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
-Completed 3.2 MiB/9.2 MiB (4.9 MiB/s) with 1 file(s) remaining  
-Completed 3.5 MiB/9.2 MiB (5.3 MiB/s) with 1 file(s) remaining  
-Completed 3.7 MiB/9.2 MiB (5.2 MiB/s) with 1 file(s) remaining  
-Completed 4.0 MiB/9.2 MiB (5.5 MiB/s) with 1 file(s) remaining  
-Completed 4.2 MiB/9.2 MiB (5.9 MiB/s) with 1 file(s) remaining  
-Completed 4.5 MiB/9.2 MiB (6.2 MiB/s) with 1 file(s) remaining  
-Completed 4.7 MiB/9.2 MiB (6.6 MiB/s) with 1 file(s) remaining  
-Completed 5.0 MiB/9.2 MiB (5.9 MiB/s) with 1 file(s) remaining  
-Completed 5.2 MiB/9.2 MiB (6.2 MiB/s) with 1 file(s) remaining  
-Completed 5.5 MiB/9.2 MiB (6.5 MiB/s) with 1 file(s) remaining  
-Completed 5.7 MiB/9.2 MiB (6.3 MiB/s) with 1 file(s) remaining  
-Completed 6.0 MiB/9.2 MiB (6.6 MiB/s) with 1 file(s) remaining  
-Completed 6.2 MiB/9.2 MiB (6.8 MiB/s) with 1 file(s) remaining  
-Completed 6.5 MiB/9.2 MiB (7.1 MiB/s) with 1 file(s) remaining  
-Completed 6.7 MiB/9.2 MiB (7.4 MiB/s) with 1 file(s) remaining  
-Completed 7.0 MiB/9.2 MiB (7.4 MiB/s) with 1 file(s) remaining  
-Completed 7.2 MiB/9.2 MiB (7.7 MiB/s) with 1 file(s) remaining  
-Completed 7.5 MiB/9.2 MiB (7.9 MiB/s) with 1 file(s) remaining  
-Completed 7.7 MiB/9.2 MiB (7.4 MiB/s) with 1 file(s) remaining  
-Completed 8.0 MiB/9.2 MiB (7.7 MiB/s) with 1 file(s) remaining  
-Completed 8.2 MiB/9.2 MiB (7.9 MiB/s) with 1 file(s) remaining  
-Completed 8.5 MiB/9.2 MiB (7.9 MiB/s) with 1 file(s) remaining  
-Completed 8.7 MiB/9.2 MiB (8.1 MiB/s) with 1 file(s) remaining  
-Completed 9.0 MiB/9.2 MiB (8.4 MiB/s) with 1 file(s) remaining  
-Completed 9.2 MiB/9.2 MiB (8.6 MiB/s) with 1 file(s) remaining  
-upload: ./TESTFILE_10MB to s3://bucket0/TESTFILE_10MB           
-{
-    "AcceptRanges": "bytes",
-    "LastModified": "2021-07-20T12:14:57+00:00",
-    "ContentLength": 9684967,
-    "ETag": "\"8436ec3074b36db9257b0d12717910f3-2\"",
+    "ETag": "\"b0e8646234deadafaacafb24b64891c6-1\"",
     "ContentType": "image/bmp",
     "Metadata": {}
 }
+
 ```
 
 
