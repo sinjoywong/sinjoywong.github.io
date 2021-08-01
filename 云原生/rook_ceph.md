@@ -10,7 +10,7 @@
 
 https://www.cnblogs.com/deny/p/14235814.html
 
-![img](https://01.org/sites/default/files/resize/users/u25390/intro-to-rook-ceph-ceph-cluster-maint-490x322.png)
+![img](rook_ceph.assets/intro-to-rook-ceph-ceph-cluster-maint-490x322.png)
 
 
 
