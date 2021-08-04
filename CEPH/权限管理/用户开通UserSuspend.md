@@ -72,6 +72,29 @@ int process_request(...){
 
 
 
+```c++
+static int read_bucket_policy(RGWRados *store,
+                              struct req_state *s,
+                              RGWBucketInfo& bucket_info,
+                              map<string, bufferlist>& bucket_attrs,
+                              RGWAccessControlPolicy *policy,
+                              rgw_bucket& bucket)
+{
+  if (!s->system_request && bucket_info.flags & BUCKET_SUSPENDED) {
+    ldpp_dout(s, 0) << "NOTICE: bucket " << bucket_info.bucket.name
+        << " is suspended" << dendl;
+    return -ERR_USER_SUSPENDED;
+  }
+...
+}
+```
+
+
+
+
+
+
+
 ## 设置User状态
 
 ```c++
@@ -85,4 +108,135 @@ int process_request(...){
 ```
 
 
+
+````c++
+void RGWOp_User_Modify::execute(){
+     RESTArgs::get_bool(s, "suspended", false, &suspended);
+    
+    if (s->info.args.exists("suspended"))
+        op_state.set_suspension(suspended)
+}
+````
+
+```c++
+int RGWUser::execute_add(RGWUserAdminOpState& op_state, std::string *err_msg)
+{
+      user_info.suspended = op_state.get_suspension_status();
+    ...
+}
+
+int RGWUser::execute_modify(RGWUserAdminOpState& op_state, std::string *err_msg)
+{
+    if (op_state.has_suspension_op()) {
+        __u8 suspended = op_state.get_suspension_status();
+        user_info.suspended = suspended;
+        ...
+    }
+    ret = store->set_buckets_enabled(bucket_names, !suspended);
+}
+```
+
+
+
+## bucket suspended
+
+bucket的flag
+
+```c++
+enum RGWBucketFlags {
+  BUCKET_SUSPENDED = 0x1, //看这个
+  BUCKET_VERSIONED = 0x2,
+  BUCKET_VERSIONS_SUSPENDED = 0x4,
+  BUCKET_DATASYNC_DISABLED = 0X8,
+  BUCKET_MFA_ENABLED = 0X10,
+  BUCKET_OBJ_LOCK_ENABLED = 0X20,
+};
+```
+
+### Set方法
+
+
+
+```c++
+//rgw_user.cc
+int RGWUser::execute_modify(RGWUserAdminOpState& op_state, std::string *err_msg)
+{
+    
+	ret = store->set_buckets_enabled(bucket_names, !suspended);
+
+```
+
+
+
+```c++
+int RGWRados::set_buckets_enabled(vector<rgw_bucket>& buckets, bool enabled)
+{
+    if (enabled) {
+      info.flags &= ~BUCKET_SUSPENDED;
+    } else {
+      info.flags |= BUCKET_SUSPENDED;
+    }
+}
+```
+
+
+
+```c++
+
+int RGWRados::bucket_suspended(rgw_bucket& bucket, bool *suspended)
+{
+  RGWBucketInfo bucket_info;
+  auto obj_ctx = svc.sysobj->init_obj_ctx();
+  int ret = get_bucket_info(obj_ctx, bucket.tenant, bucket.name, bucket_info, NULL);
+  if (ret < 0) {
+    return ret;
+  }
+
+  *suspended = ((bucket_info.flags & BUCKET_SUSPENDED) != 0);
+  return 0;
+}
+```
+
+
+
+### Get方法
+
+```c++
+static int read_bucket_policy(RGWRados *store,
+                              struct req_state *s,
+                              RGWBucketInfo& bucket_info,
+                              map<string, bufferlist>& bucket_attrs,
+                              RGWAccessControlPolicy *policy,
+                              rgw_bucket& bucket)
+{
+  if (!s->system_request && bucket_info.flags & BUCKET_SUSPENDED) {
+    ldpp_dout(s, 0) << "NOTICE: bucket " << bucket_info.bucket.name
+        << " is suspended" << dendl;
+    return -ERR_USER_SUSPENDED;
+  }
+    ...
+}
+
+static int read_obj_policy(RGWRados *store,
+                           struct req_state *s,
+                           RGWBucketInfo& bucket_info,
+                           map<string, bufferlist>& bucket_attrs,
+                           RGWAccessControlPolicy* acl,
+                           string *storage_class,
+			   boost::optional<Policy>& policy,
+                           rgw_bucket& bucket,
+                           rgw_obj_key& object)
+{
+  string upload_id;
+  upload_id = s->info.args.get("uploadId");
+  rgw_obj obj;
+
+  if (!s->system_request && bucket_info.flags & BUCKET_SUSPENDED) {
+    ldpp_dout(s, 0) << "NOTICE: bucket " << bucket_info.bucket.name
+        << " is suspended" << dendl;
+    return -ERR_USER_SUSPENDED;
+  }
+  ...
+}
+```
 
