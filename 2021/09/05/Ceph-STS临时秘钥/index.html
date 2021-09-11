@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=2">
+<meta name="theme-color" content="#222">
+<meta name="generator" content="Hexo 5.4.0">
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon-next.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32-next.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16-next.png">
+  <link rel="mask-icon" href="/images/logo.svg" color="#222">
+
+<link rel="stylesheet" href="/css/main.css">
+
+
+<link rel="stylesheet" href="/lib/font-awesome/css/all.min.css">
+  <link rel="stylesheet" href="/lib/pace/pace-theme-minimal.min.css">
+  <script src="/lib/pace/pace.min.js"></script>
+
+<script id="hexo-configurations">
+    var NexT = window.NexT || {};
+    var CONFIG = {"hostname":"sinjoywong.github.io","root":"/","scheme":"Pisces","version":"7.8.0","exturl":false,"sidebar":{"position":"left","display":"post","padding":18,"offset":12,"onmobile":false},"copycode":{"enable":false,"show_result":false,"style":null},"back2top":{"enable":true,"sidebar":false,"scrollpercent":false},"bookmark":{"enable":false,"color":"#222","save":"auto"},"fancybox":false,"mediumzoom":false,"lazyload":false,"pangu":false,"comments":{"style":"tabs","active":null,"storage":true,"lazyload":false,"nav":null},"algolia":{"hits":{"per_page":10},"labels":{"input_placeholder":"Search for Posts","hits_empty":"We didn't find any results for the search: ${query}","hits_stats":"${hits} results found in ${time} ms"}},"localsearch":{"enable":false,"trigger":"auto","top_n_per_article":1,"unescape":false,"preload":false},"motion":{"enable":true,"async":false,"transition":{"post_block":"fadeIn","post_header":"slideDownIn","post_body":"slideDownIn","coll_header":"slideLeftIn","sidebar":"slideUpIn"}}};
+  </script>
+
+  <meta name="description" content="调研CEPH中STS功能的实现.关键词:OIDC, Role, AssumeRole, WebIdentity, keycloak, ceph认证流程">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Ceph:STS临时秘钥">
+<meta property="og:url" content="https://sinjoywong.github.io/2021/09/05/Ceph-STS%E4%B8%B4%E6%97%B6%E7%A7%98%E9%92%A5/index.html">
+<meta property="og:site_name" content="程序大爆炸">
+<meta property="og:description" content="调研CEPH中STS功能的实现.关键词:OIDC, Role, AssumeRole, WebIdentity, keycloak, ceph认证流程">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:image" content="https://sinjoywong.github.io/2021/09/05/Ceph-STS%E4%B8%B4%E6%97%B6%E7%A7%98%E9%92%A5/.STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/20200920150958.jpg">
+<meta property="og:image" content="https://sinjoywong.github.io/2021/09/05/Ceph-STS%E4%B8%B4%E6%97%B6%E7%A7%98%E9%92%A5/.STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/image-20210627183813161.png">
+<meta property="og:image" content="https://sinjoywong.github.io/2021/09/05/Ceph-STS%E4%B8%B4%E6%97%B6%E7%A7%98%E9%92%A5/.STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/image-20210627231303457.png">
+<meta property="og:image" content="https://sinjoywong.github.io/2021/09/05/Ceph-STS%E4%B8%B4%E6%97%B6%E7%A7%98%E9%92%A5/.STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/image-20210627183433955.png">
+<meta property="article:published_time" content="2021-09-05T09:07:31.000Z">
+<meta property="article:modified_time" content="2021-09-05T09:32:53.138Z">
+<meta property="article:author" content="sinjoywong">
+<meta property="article:tag" content="ceph">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://sinjoywong.github.io/2021/09/05/Ceph-STS%E4%B8%B4%E6%97%B6%E7%A7%98%E9%92%A5/.STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/20200920150958.jpg">
+
+<link rel="canonical" href="https://sinjoywong.github.io/2021/09/05/Ceph-STS%E4%B8%B4%E6%97%B6%E7%A7%98%E9%92%A5/">
+
+
+<script id="page-configurations">
+  // https://hexo.io/docs/variables.html
+  CONFIG.page = {
+    sidebar: "",
+    isHome : false,
+    isPost : true,
+    lang   : 'zh-CN'
+  };
+</script>
+
+  <title>Ceph:STS临时秘钥 | 程序大爆炸</title>
+  
+
+
+
+
+
+
+  <noscript>
+  <style>
+  .use-motion .brand,
+  .use-motion .menu-item,
+  .sidebar-inner,
+  .use-motion .post-block,
+  .use-motion .pagination,
+  .use-motion .comments,
+  .use-motion .post-header,
+  .use-motion .post-body,
+  .use-motion .collection-header { opacity: initial; }
+
+  .use-motion .site-title,
+  .use-motion .site-subtitle {
+    opacity: initial;
+    top: initial;
+  }
+
+  .use-motion .logo-line-before i { left: initial; }
+  .use-motion .logo-line-after i { right: initial; }
+  </style>
+</noscript>
+
+<link rel="alternate" href="/atom.xml" title="程序大爆炸" type="application/atom+xml">
+</head>
+
+<body itemscope itemtype="http://schema.org/WebPage">
+  <div class="container use-motion">
+    <div class="headband"></div>
+
+    <header class="header" itemscope itemtype="http://schema.org/WPHeader">
+      <div class="header-inner"><div class="site-brand-container">
+  <div class="site-nav-toggle">
+    <div class="toggle" aria-label="切换导航栏">
+      <span class="toggle-line toggle-line-first"></span>
+      <span class="toggle-line toggle-line-middle"></span>
+      <span class="toggle-line toggle-line-last"></span>
+    </div>
+  </div>
+
+  <div class="site-meta">
+
+    <a href="/" class="brand" rel="start">
+      <span class="logo-line-before"><i></i></span>
+      <h1 class="site-title">程序大爆炸</h1>
+      <span class="logo-line-after"><i></i></span>
+    </a>
+      <p class="site-subtitle" itemprop="description">持续积累</p>
+  </div>
+
+  <div class="site-nav-right">
+    <div class="toggle popup-trigger">
+    </div>
+  </div>
+</div>
+
+
+
+
+<nav class="site-nav">
+  <ul id="menu" class="main-menu menu">
+        <li class="menu-item menu-item-home">
+
+    <a href="/" rel="section"><i class="fa fa-home fa-fw"></i>首页</a>
+
+  </li>
+        <li class="menu-item menu-item-tags">
+
+    <a href="/tags/" rel="section"><i class="fa fa-tags fa-fw"></i>标签</a>
+
+  </li>
+        <li class="menu-item menu-item-categories">
+
+    <a href="/categories/" rel="section"><i class="fa fa-th fa-fw"></i>分类</a>
+
+  </li>
+        <li class="menu-item menu-item-archives">
+
+    <a href="/archives/" rel="section"><i class="fa fa-archive fa-fw"></i>归档</a>
+
+  </li>
+  </ul>
+</nav>
+
+
+
+
+</div>
+    </header>
+
+    
+  <div class="back-to-top">
+    <i class="fa fa-arrow-up"></i>
+    <span>0%</span>
+  </div>
+
+
+    <main class="main">
+      <div class="main-inner">
+        <div class="content-wrap">
+          
+
+          <div class="content post posts-expand">
+            
+
+    
+  
+  
+  <article itemscope itemtype="http://schema.org/Article" class="post-block" lang="zh-CN">
+    <link itemprop="mainEntityOfPage" href="https://sinjoywong.github.io/2021/09/05/Ceph-STS%E4%B8%B4%E6%97%B6%E7%A7%98%E9%92%A5/">
+
+    <span hidden itemprop="author" itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="image" content="/images/avatar.gif">
+      <meta itemprop="name" content="sinjoywong">
+      <meta itemprop="description" content="围绕分布式存储">
+    </span>
+
+    <span hidden itemprop="publisher" itemscope itemtype="http://schema.org/Organization">
+      <meta itemprop="name" content="程序大爆炸">
+    </span>
+      <header class="post-header">
+        <h1 class="post-title" itemprop="name headline">
+          Ceph:STS临时秘钥
+        </h1>
+
+        <div class="post-meta">
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-calendar"></i>
+              </span>
+              <span class="post-meta-item-text">发表于</span>
+              
+
+              <time title="创建时间：2021-09-05 17:07:31 / 修改时间：17:32:53" itemprop="dateCreated datePublished" datetime="2021-09-05T17:07:31+08:00">2021-09-05</time>
+            </span>
+            <span class="post-meta-item">
+              <span class="post-meta-item-icon">
+                <i class="far fa-folder"></i>
+              </span>
+              <span class="post-meta-item-text">分类于</span>
+                <span itemprop="about" itemscope itemtype="http://schema.org/Thing">
+                  <a href="/categories/ceph/" itemprop="url" rel="index"><span itemprop="name">ceph</span></a>
+                </span>
+            </span>
+
+          <br>
+            <span class="post-meta-item" title="本文字数">
+              <span class="post-meta-item-icon">
+                <i class="far fa-file-word"></i>
+              </span>
+                <span class="post-meta-item-text">本文字数：</span>
+              <span>20k</span>
+            </span>
+            <span class="post-meta-item" title="阅读时长">
+              <span class="post-meta-item-icon">
+                <i class="far fa-clock"></i>
+              </span>
+                <span class="post-meta-item-text">阅读时长 &asymp;</span>
+              <span>18 分钟</span>
+            </span>
+            <div class="post-description">调研CEPH中STS功能的实现.关键词:OIDC, Role, AssumeRole, WebIdentity, keycloak, ceph认证流程</div>
+
+        </div>
+      </header>
+
+    
+    
+    
+    <div class="post-body" itemprop="articleBody">
+
+      
+        <h1 id="AssumeRoleWithWebIdentity"><a href="#AssumeRoleWithWebIdentity" class="headerlink" title="AssumeRoleWithWebIdentity"></a>AssumeRoleWithWebIdentity</h1><h2 id="可能的问题"><a href="#可能的问题" class="headerlink" title="可能的问题"></a>可能的问题</h2><ol>
+<li><p>目前AssumeRoleWithWebIdentity功能仅在O版以上支持，涉及WebIdentityApplier相关的改动，backport到N版的话代码量可能有5k多行左右，兼容性问题未知。</p>
+</li>
+<li><p>目前官网上仅与keycloak有集成测试，使用OIDC协议的其他Provider可能也可以（暂未测试），需根据客户需求详细调查。</p>
+</li>
+<li><p>While this whole process seems quite long-winded it takes place in milliseconds and once a client has a session open that application or user can use the token for as long as the session lifetime is specified for.</p>
+<p>There are a couple of limitations today in Nautilus and Octopus for using STS with radosgw, and these revolve around multi-tenancy support and multiple role support. While these are both still under development we don’t expect to see them upstream in Ceph until at least the Pacific release. In the meantime, if we’re looking to do multi-tenancy or a mature list of role policies we can use a standalone OpenStack Keystone instance to bridge the gap and handle the OIDC connection on our behalf.</p>
+<blockquote>
+<p><a target="_blank" rel="noopener" href="https://softiron.com/blog/integrating-rados-gateway-with-an-external-oidc-provider/">https://softiron.com/blog/integrating-rados-gateway-with-an-external-oidc-provider/</a></p>
+</blockquote>
+</li>
+</ol>
+<h2 id="主要代码提交"><a href="#主要代码提交" class="headerlink" title="主要代码提交"></a>主要代码提交</h2><p><a target="_blank" rel="noopener" href="https://github.com/ceph/ceph/commit/463c5603bd3e836fd504b9be212ee1e0e640948e">rgw: Initial commit for AssumeRoleWithWebIdentity.</a></p>
+<p><a target="_blank" rel="noopener" href="https://github.com/ceph/ceph/commit/001f0577135f2932b9a16bf0ec6ec9b1f6b06424">rgw: Added code for auth using temp credentials returned by STS.</a></p>
+<p><a target="_blank" rel="noopener" href="https://github.com/ceph/ceph/pull/37640">octopus: rgw: adds code for creating and managing oidc provider entities in rgw and for offline validation of OpenID Connect Access and ID Token</a></p>
+<p><a target="_blank" rel="noopener" href="https://github.com/ceph/ceph/commit/a92a68b5fb554ee1b965de24106af15f004092aa">rgw: adds REST APIs for OpenID connect providers manipulation.</a></p>
+<h2 id="参考文档"><a href="#参考文档" class="headerlink" title="参考文档"></a>参考文档</h2><p>OIDC：<a target="_blank" rel="noopener" href="https://blog.csdn.net/iamlake/article/details/93415206">https://blog.csdn.net/iamlake/article/details/93415206</a></p>
+<p>OAuth2.0 Authorization Framework: <a target="_blank" rel="noopener" href="https://datatracker.ietf.org/doc/html/rfc6749#section-3.2">https://datatracker.ietf.org/doc/html/rfc6749#section-3.2</a></p>
+<p>使用keycloak实现k8s用户权限的统一管理： <a target="_blank" rel="noopener" href="https://cloud.tencent.com/developer/article/1680759">https://cloud.tencent.com/developer/article/1680759</a></p>
+<p>Keycloak 13自定义用户身份认证流程：<a target="_blank" rel="noopener" href="https://blog.51cto.com/u_12857552/2796318">https://blog.51cto.com/u_12857552/2796318</a></p>
+<p><a target="_blank" rel="noopener" href="https://docs.ceph.com/en/latest/radosgw/STS/">STS in Ceph</a>：这是v:latest版本的doc，所述的keyclock在octopus中集成，但还未在nautilus中集成。</p>
+<p>aws的AssumeRoleWithWebIdentity在线体验：<a target="_blank" rel="noopener" href="https://web-identity-federation-playground.s3.amazonaws.com/index.html">aws: Web Identity Federation Playground:</a></p>
+<p><a target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=U70FB6mlKNY">youtube:Pritha Srivastava: STS in Ceph</a></p>
+<p><a target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=YQsK4MtsELU">youtube: aws re:Invent, STS</a></p>
+<p><a target="_blank" rel="noopener" href="https://www.youtube.com/watch?v=U70FB6mlKNY">youtube: ceph sts</a></p>
+<p>awscli 针对iam的接口：<a target="_blank" rel="noopener" href="https://docs.aws.amazon.com/cli/latest/reference/iam/add-client-id-to-open-id-connect-provider.htmlaws">https://docs.aws.amazon.com/cli/latest/reference/iam/add-client-id-to-open-id-connect-provider.htmlaws</a> sts assume-role-with-web-identity](<a target="_blank" rel="noopener" href="https://docs.aws.amazon.com/fr_fr/cli/latest/reference/sts/assume-role-with-web-identity.html">https://docs.aws.amazon.com/fr_fr/cli/latest/reference/sts/assume-role-with-web-identity.html</a>).</p>
+<p>AssumeRoleWithWebIdentity社区问答：</p>
+<blockquote>
+<p><a target="_blank" rel="noopener" href="https://www.spinics.net/lists/ceph-users/msg62804.html">https://www.spinics.net/lists/ceph-users/msg62804.html</a></p>
+<p><a target="_blank" rel="noopener" href="https://www.spinics.net/lists/ceph-users/msg62736.html">https://www.spinics.net/lists/ceph-users/msg62736.html</a></p>
+<p><a target="_blank" rel="noopener" href="https://www.spinics.net/lists/ceph-users/msg62812.html">https://www.spinics.net/lists/ceph-users/msg62812.html</a></p>
+<p><a target="_blank" rel="noopener" href="https://www.spinics.net/lists/ceph-users/msg62824.html">https://www.spinics.net/lists/ceph-users/msg62824.html</a></p>
+</blockquote>
+<h2 id="OIDC基本概念"><a href="#OIDC基本概念" class="headerlink" title="OIDC基本概念"></a>OIDC基本概念</h2><p>OIDC是基于OAuth2+OpenID整合的新的认证授权协议; OAuth2是一个授权(authorization)的开放协议, 在全世界得到广泛使用, 但在实际使用中,OAuth2只解决了授权问题, 没有实现认证部分,往往需要添加额外的API来实现认证; 而OpenID是一个认证(authentication )的协议, 二者在实际使用过程中都有其局限性;</p>
+<p>综合二者,即是OIDC; 通过OIDC,既能有OAUTH2的功能,也有OpenID的功能就是在 OAuth2 上多做了一个身份层，是一个基于 OAuth2 协议的身份认证标准协议。OIDC 使用 OAuth2 的授权服务器来为第三方客户端提供用户的身份认证，并把对应的身份认证信息传递给客户端，且可以适用于各种类型的客户端（比如服务端应用，移动APP，前端 SPA ），且完全兼容 OAuth2。</p>
+<p>OIDC基本流程如下所示：<a target="_blank" rel="noopener" href="https://openid.net/specs/openid-connect-core-1_0.html#Terminology">来源</a></p>
+<ul>
+<li><strong>EU</strong> End-User, 指用户(一般指有账号的个体，资源的拥有者)。==此处指在keycloak中创建出来的User。==</li>
+<li><strong>RP</strong> Relying Party, 信任方(一般是一个软件应用), 理解为OAuth2中的客户端(client)即可, 需要在OP中注册。==此处指keycloak-quick-start demo app-profile-jee-jsp。==</li>
+<li><strong>OP</strong> OpenID Provider, 能提供对EU进行认证的服务端(可理解为OAuth2中授权服务端),<br>提供RP的注册(或管理)能力，EU管理，ID Token的签发与管理等。OIDC中的核心组件。==此处指keycloak。==</li>
+<li><strong>ID Token</strong> 格式为JSON Web Token(<a target="_blank" rel="noopener" href="http://tools.ietf.org/html/draft-ietf-oauth-json-web-token">JWT</a>),<br>包含EU认证授权信息等. 有关JWT请访问 <a target="_blank" rel="noopener" href="https://jwt.io/%E9%99%A4%E4%BA%86JWT">https://jwt.io/除了JWT</a>, 知道以下概念对掌握OIDC会很有帮助<br>JSON Web Key(<a target="_blank" rel="noopener" href="https://tools.ietf.org/html/draft-ietf-jose-json-web-key-41">JWK</a>),<br>JSON Web Encryption(<a target="_blank" rel="noopener" href="http://tools.ietf.org/html/draft-ietf-jose-json-web-encryption">JWE</a>),<br>JSON Web Algorithm(<a target="_blank" rel="noopener" href="http://tools.ietf.org/html/draft-ietf-jose-json-web-algorithms">JWA</a>),<br>JSON Web Signature(<a target="_blank" rel="noopener" href="https://tools.ietf.org/html/draft-ietf-jose-json-web-signature-41">JWS</a>)</li>
+<li><strong>UserInfo Endpoint</strong> EU信息接口(OAuth2保护), 在RP获取到<code>access_token</code>后,可调用此接口获取EU的详细信息.<br>OIDC要求此接口必须使用https访问(更安全)；一般在OP中提供的<a target="_blank" rel="noopener" href="https://openid.net/specs/openid-connect-discovery-1_0.html">Discovery</a>中获取。==此处指AssumeRoleWithWebIdentity来角色扮演访问Ceph==</li>
+<li><strong>Claim</strong> EU信息的载体, 可在<code>id_token</code>中获取,主要包括认证信息与授权信息，可根据实际扩展</li>
+</ul>
+<p><img src=".STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/20200920150958.jpg" alt="img"></p>
+<p>OIDC Provider Entity:</p>
+<h3 id="keycloak"><a href="#keycloak" class="headerlink" title="keycloak"></a>keycloak</h3><h4 id="realm"><a href="#realm" class="headerlink" title="realm"></a>realm</h4><p>把 realm 想像成租户的概念。</p>
+<p><code>Master realm</code>: 这个 realm 是初始化时创建的，它包含超级管理员。使用这个 realm 管理其它的 realm。</p>
+<p><code>Other realm</code> : 超级管理员创建的 realm 。在这些 realm 里，超级管理员创建用户和应用程序，用户拥有应用程序。一个realm作为一个租户，作为权限管理的基本单位，一个realm下可以创建多个用户，此时多个用户具有相同的权限。详见<a target="_blank" rel="noopener" href="https://www.keycloak.org/docs/latest/getting_started/">Creating a realm and a user</a>。</p>
+<h2 id="CEPH-STS与Keycloak交互流程"><a href="#CEPH-STS与Keycloak交互流程" class="headerlink" title="CEPH STS与Keycloak交互流程"></a>CEPH STS与Keycloak交互流程</h2><p>上面作为一般流程引入一些基本概念，Ceph STS与Keycloak之间的交互流程有些细节不同：</p>
+<ol>
+<li><p>管理IAM账户创建rgw role</p>
+<blockquote>
+<p>需要一个rgw用户（此处以testid为例），赋予caps=”roles=*”的权限，作为管理账户。创建一个role，名称为S3Access，并赋予相关policy；</p>
+</blockquote>
+</li>
+<li><p>shadow iam账户创建open id connect provider entity</p>
+<blockquote>
+<p>rgw用户TESTER，赋予caps=”oidc-provider=*”权限，作为shadow账户，作为oidc-provider entity，主要保存如下OIDC Provider的Url（指定realms），ClientId，Thumbprint。</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br></pre></td><td class="code"><pre><span class="line">&#123;</span><br><span class="line">&quot;Url&quot;: &quot;http://9.134.3.72:8080/auth/realms/demo&quot;,</span><br><span class="line">&quot;ClientIDList&quot;: [</span><br><span class="line">&quot;app-profile-jsp&quot;</span><br><span class="line">],</span><br><span class="line">&quot;ThumbprintList&quot;: [</span><br><span class="line">&quot;AC9F85A386436B9EF71B0B2036AAA0E7273B59F1&quot;</span><br><span class="line">]</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>将负责与keycloak交互认证，以进行角色扮演获得临时密钥。</p>
+</blockquote>
+</li>
+<li><p>用户拿到keycloak的access_token</p>
+<blockquote>
+<p>用户访问<code>http://$KC_SERVER/$KC_CONTEXT/realms/$KC_REALM/protocol/openid-connect/toke</code>来得到access_token。需要传入client_id（此处示例为app-profile-jsp）和client_secret，需要从keycloak中对应的client管理页面获取。</p>
+<p>[注]：可以看到这里可能需要HTTPS，因为client_id和client_secret是明文传输的。</p>
+</blockquote>
+</li>
+<li><p>用户使用access_token来AssumeRoleWithWebIdentity，拿到tmpAk/tmpSk/token</p>
+<blockquote>
+<p>此处涉及到rgw与keycloak的认证交互。</p>
+<p>rgw接收到传入的access_token，将使用WebTokenEngin::authenticate进行认证，主要流程为：解析JWT(Json Web Token)，从rgw本地获得provider信息，进行签名校验。</p>
+<p>此处的签名实际上就是通过比对之前创建OpenIdProvider entity时写入的Thumbprint与通过GET OpenIdProvider（此处即keycloak）的<code>/protocol/openid-connect/certs</code>来进行的。</p>
+<p>认证通过后，将会创建随机字符串的tmpAk/tmpSk,并创建一个token，将所需必要信息（access_key_id, secret_access_key, policy, roleId等信息存入。</p>
+<p><strong>额外需要一个token的原因：</strong></p>
+<p>因为没有IAM用户实体，无法进行S3用户校验、也无法进行操作签名校验、鉴权、有效期判断等操作，还需要一个token来传递这些信息。</p>
+</blockquote>
+</li>
+<li><p>用户使用tmpAk/tmpSk/token访问ceph</p>
+<blockquote>
+<p>进入S3操作时，使用rgw::auth::s3::STSEngine:::authenticate()进行认证，主要操作包括JWT(Json Web Token)解析、过期时间判断、签名校验、加入token中额外带的policy到role。认证通过后，将modify_request_state，将role的policy赋给s-&gt;iam_user_policies，用户后面S3操作时进行鉴权。例如普通上传对象的<code>RGWPutObj::verify_permission</code>，将在<code>iam_user_policies.empty</code>不为空的情况下使用user policy鉴权。</p>
+</blockquote>
+</li>
+</ol>
+<h2 id="交互流程图"><a href="#交互流程图" class="headerlink" title="交互流程图"></a>交互流程图</h2><pre class="mermaid">sequenceDiagram
+    participant AppUser
+    participant Keycloak
+    participant RGW
+    
+    AppUser ->> Keycloak: 登录keycloak
+    Keycloak ->> AppUser: 获得access_token
+    AppUser ->> RGW: AssumeRoleWithWebIdentity(access_token)
+    RGW ->> Keycloak: 请求certs用于认证
+    Keycloak ->> RGW: 获得certs,认证通过
+    RGW ->> AppUser:创建临时密钥与token，返回给AppUser
+    AppUser ->> RGW: 使用临时密钥与token，访问RGW
+    RGW ->> RGW : 解析token，expiration/signature校验,通过后将user_policy赋给req_state
+    RGW ->> RGW: 对于RGWOP对user_policy鉴权
+    RGW ->> RGW: S3操作
+    RGW ->> AppUser: 返回S3操作结果</pre>
+
+<h2 id="完整脚本示例"><a href="#完整脚本示例" class="headerlink" title="完整脚本示例"></a>完整脚本示例</h2><p>Ceph Octopus+Keycloak</p>
+<p>详细安装部署流程见《rgw与keycloak》。</p>
+<blockquote>
+<p>官网上的安装流程有部分步骤是错误的。</p>
+<p>keycloak-13.0.0无需额外部署WildFly，</p>
+<p>添加keycloak.json配置文件应该在keycloak-quickstarts/app-profile-jee-jsp/config/，而非keycloak-quickstarts/app-profile-jee-jsp/src/main/webapp下</p>
+<p>要求maven版本高于el7源中的提供版本，需要额外下载，手动软链接指向高版本mvn</p>
+</blockquote>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br><span class="line">63</span><br><span class="line">64</span><br><span class="line">65</span><br><span class="line">66</span><br><span class="line">67</span><br><span class="line">68</span><br><span class="line">69</span><br><span class="line">70</span><br><span class="line">71</span><br><span class="line">72</span><br><span class="line">73</span><br><span class="line">74</span><br><span class="line">75</span><br><span class="line">76</span><br><span class="line">77</span><br><span class="line">78</span><br><span class="line">79</span><br><span class="line">80</span><br><span class="line">81</span><br><span class="line">82</span><br><span class="line">83</span><br><span class="line">84</span><br><span class="line">85</span><br><span class="line">86</span><br><span class="line">87</span><br><span class="line">88</span><br><span class="line">89</span><br><span class="line">90</span><br><span class="line">91</span><br><span class="line">92</span><br><span class="line">93</span><br><span class="line">94</span><br><span class="line">95</span><br><span class="line">96</span><br><span class="line">97</span><br><span class="line">98</span><br><span class="line">99</span><br><span class="line">100</span><br><span class="line">101</span><br><span class="line">102</span><br><span class="line">103</span><br><span class="line">104</span><br><span class="line">105</span><br><span class="line">106</span><br><span class="line">107</span><br><span class="line">108</span><br><span class="line">109</span><br><span class="line">110</span><br><span class="line">111</span><br><span class="line">112</span><br><span class="line">113</span><br><span class="line">114</span><br><span class="line">115</span><br><span class="line">116</span><br><span class="line">117</span><br><span class="line">118</span><br><span class="line">119</span><br><span class="line">120</span><br><span class="line">121</span><br><span class="line">122</span><br><span class="line">123</span><br><span class="line">124</span><br><span class="line">125</span><br><span class="line">126</span><br><span class="line">127</span><br><span class="line">128</span><br><span class="line">129</span><br><span class="line">130</span><br><span class="line">131</span><br><span class="line">132</span><br><span class="line">133</span><br><span class="line">134</span><br><span class="line">135</span><br><span class="line">136</span><br><span class="line">137</span><br><span class="line">138</span><br><span class="line">139</span><br><span class="line">140</span><br><span class="line">141</span><br><span class="line">142</span><br><span class="line">143</span><br><span class="line">144</span><br><span class="line">145</span><br><span class="line">146</span><br><span class="line">147</span><br><span class="line">148</span><br><span class="line">149</span><br><span class="line">150</span><br><span class="line">151</span><br><span class="line">152</span><br><span class="line">153</span><br><span class="line">154</span><br><span class="line">155</span><br><span class="line">156</span><br><span class="line">157</span><br><span class="line">158</span><br><span class="line">159</span><br><span class="line">160</span><br><span class="line">161</span><br><span class="line">162</span><br><span class="line">163</span><br><span class="line">164</span><br><span class="line">165</span><br><span class="line">166</span><br><span class="line">167</span><br><span class="line">168</span><br><span class="line">169</span><br><span class="line">170</span><br><span class="line">171</span><br><span class="line">172</span><br><span class="line">173</span><br><span class="line">174</span><br><span class="line">175</span><br><span class="line">176</span><br><span class="line">177</span><br><span class="line">178</span><br><span class="line">179</span><br><span class="line">180</span><br><span class="line">181</span><br><span class="line">182</span><br><span class="line">183</span><br><span class="line">184</span><br></pre></td><td class="code"><pre><span class="line"><span class="meta">#</span><span class="bash">0.在ceph.conf中配置</span></span><br><span class="line">rgw sts key = rL9FabxCOw5LDbrHtmykiGSCjzpKLmEs9WPiNjVJ</span><br><span class="line">rgw s3 auth use sts = true</span><br><span class="line"><span class="meta"></span></span><br><span class="line"><span class="meta">#</span><span class="bash">1. 使用TESTER账户，创建openid connect provider</span></span><br><span class="line">function create_openid_connect_provider()&#123;</span><br><span class="line">aws iam --endpoint-url=$RGW_ENDPOINT \</span><br><span class="line">        --profile $PROFILE \</span><br><span class="line">        --region &quot;chongqing&quot; \</span><br><span class="line">        create-open-id-connect-provider \</span><br><span class="line">        --cli-input-json file://open_id_connect_provider.json</span><br><span class="line">&#125;</span><br><span class="line">&#123;</span><br><span class="line">    &quot;OpenIDConnectProviderArn&quot;: &quot;arn:aws:iam:::oidc-provider/9.134.3.72:8080/auth/realms/demo&quot;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">#</span><span class="bash">2.使用TESTER账户，查看当前openid provider list:</span></span><br><span class="line">function get_openid_connect_provider()&#123;</span><br><span class="line">aws iam --endpoint-url=$RGW_ENDPOINT \</span><br><span class="line">        --profile $PROFILE \</span><br><span class="line">        --region &quot;chongqing&quot; \</span><br><span class="line">        list-open-id-connect-providers</span><br><span class="line">&#125;</span><br><span class="line">        </span><br><span class="line">&#123;</span><br><span class="line">    &quot;OpenIDConnectProviderList&quot;: [</span><br><span class="line">        &#123;</span><br><span class="line">            &quot;Arn&quot;: &quot;arn:aws:iam:::oidc-provider/9.134.3.72:8080/auth/realms/demo&quot;</span><br><span class="line">        &#125;</span><br><span class="line">    ]</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">#</span><span class="bash">3.使用TESTER用户，查看当前openid provider:</span></span><br><span class="line">function get_openid_connect_provider()&#123;</span><br><span class="line">    aws iam --endpoint-url=$RGW_ENDPOINT \</span><br><span class="line">        --region chongqing \</span><br><span class="line">        --profile $PROFILE \</span><br><span class="line">        get-open-id-connect-provider  \</span><br><span class="line">            --open-id-connect-provider-arn $1</span><br><span class="line">&#125;</span><br><span class="line">get_openid_connect_provider &quot;arn:aws:iam:::oidc-provider/9.134.3.72:8080/auth/realms/demo&quot;</span><br><span class="line">&#123;</span><br><span class="line">    &quot;Url&quot;: &quot;http://9.134.3.72:8080/auth/realms/demo&quot;,</span><br><span class="line">    &quot;ClientIDList&quot;: [</span><br><span class="line">        &quot;app-profile-jsp&quot;</span><br><span class="line">    ],</span><br><span class="line">    &quot;ThumbprintList&quot;: [</span><br><span class="line">        &quot;AC9F85A386436B9EF71B0B2036AAA0E7273B59F1&quot;</span><br><span class="line">    ],</span><br><span class="line">    &quot;CreateDate&quot;: &quot;2021-06-27T05:43:13.516000+00:00&quot;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta"></span></span><br><span class="line"><span class="meta">#</span><span class="bash">4.1 使用管理账户，创建role</span></span><br><span class="line"><span class="meta">#</span><span class="bash"> 其中Contidition表示条件，此处的account为token中的aud</span> </span><br><span class="line"><span class="meta">#</span><span class="bash"> 9.134.3.72:8080/auth/realms/demo:app_id\&quot;:\&quot;account\&quot;&#125;</span></span><br><span class="line">PROFILE=$profile_VstartOctopus_testid</span><br><span class="line">function createRoleWithAdmin()&#123;</span><br><span class="line">   aws iam --endpoint-url=$RGW_ENDPOINT \</span><br><span class="line">        --profile $PROFILE \</span><br><span class="line">        --region &quot;chongqing&quot; \</span><br><span class="line">        create-role --role-name S3Access \</span><br><span class="line">            --assume-role-policy-document &quot;&#123;\&quot;Version\&quot;:\&quot;2012-10-17\&quot;,\&quot;Statement\&quot;:[&#123;\&quot;Effect\&quot;:\&quot;Allow\&quot;,\&quot;Principal\&quot;:&#123;\&quot;Federated\&quot;:[\&quot;arn:aws:iam:::oidc-provider/9.134.3.72:8080/auth/realms/demo\&quot;]&#125;,\&quot;Action\&quot;:[\&quot;sts:AssumeRoleWithWebIdentity\&quot;],\&quot;Condition\&quot;:&#123;\&quot;StringEquals\&quot;:&#123;\&quot;9.134.3.72:8080/auth/realms/demo:app_id\&quot;:\&quot;account\&quot;&#125;&#125;&#125;]&#125;&quot;</span><br><span class="line">&#125;</span><br><span class="line">&#123;</span><br><span class="line">    &quot;Role&quot;: &#123;</span><br><span class="line">        &quot;Path&quot;: &quot;/&quot;,</span><br><span class="line">        &quot;RoleName&quot;: &quot;S3Access&quot;,</span><br><span class="line">        &quot;RoleId&quot;: &quot;1435c1cf-e627-4e86-93aa-476071612093&quot;,</span><br><span class="line">        &quot;Arn&quot;: &quot;arn:aws:iam:::role/S3Access&quot;,</span><br><span class="line">        &quot;CreateDate&quot;: &quot;2021-06-27T05:43:18.944000+00:00&quot;,</span><br><span class="line">        &quot;AssumeRolePolicyDocument&quot;: &#123;</span><br><span class="line">            &quot;Version&quot;: &quot;2012-10-17&quot;,</span><br><span class="line">            &quot;Statement&quot;: [</span><br><span class="line">                &#123;</span><br><span class="line">                    &quot;Effect&quot;: &quot;Allow&quot;,</span><br><span class="line">                    &quot;Principal&quot;: &#123;</span><br><span class="line">                        &quot;Federated&quot;: [</span><br><span class="line">                            &quot;arn:aws:iam:::oidc-provider/9.134.3.72:8080/auth/realms/demo&quot;</span><br><span class="line">                        ]</span><br><span class="line">                    &#125;,</span><br><span class="line">                    &quot;Action&quot;: [</span><br><span class="line">                        &quot;sts:AssumeRoleWithWebIdentity&quot;</span><br><span class="line">                    ],</span><br><span class="line">                    &quot;Condition&quot;: &#123;</span><br><span class="line">                        &quot;StringEquals&quot;: &#123;</span><br><span class="line">                            &quot;9.134.3.72:8080/auth/realms/demo:app_id&quot;: &quot;account&quot;</span><br><span class="line">                        &#125;</span><br><span class="line">                    &#125;</span><br><span class="line">                &#125;</span><br><span class="line">            ]</span><br><span class="line">        &#125;,</span><br><span class="line">        &quot;MaxSessionDuration&quot;: 3600</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">#</span><span class="bash">4.2 给Role添加policy</span></span><br><span class="line">function putRolePolicy()&#123;</span><br><span class="line">   aws iam --endpoint-url=$RGW_ENDPOINT \</span><br><span class="line">        --profile $PROFILE \</span><br><span class="line">        --region &quot;chongqing&quot; \</span><br><span class="line">        put-role-policy \</span><br><span class="line">        --role-name S3Access \</span><br><span class="line">        --policy-name FullS3Access \</span><br><span class="line">        --policy-document &quot;&#123;\&quot;Version\&quot;:\&quot;2012-10-17\&quot;,\&quot;Statement\&quot;:&#123;\&quot;Effect\&quot;:\&quot;Allow\&quot;,\&quot;Action\&quot;:\&quot;s3:*\&quot;,\&quot;Resource\&quot;:\&quot;arn:aws:s3:::*\&quot;&#125;&#125;&quot;</span><br><span class="line">&#125;</span><br><span class="line">&#123;</span><br><span class="line">    &quot;RoleName&quot;: &quot;S3Access&quot;,</span><br><span class="line">    &quot;PolicyName&quot;: &quot;FullS3Access&quot;,</span><br><span class="line">    &quot;PolicyDocument&quot;: &#123;</span><br><span class="line">        &quot;Version&quot;: &quot;2012-10-17&quot;,</span><br><span class="line">        &quot;Statement&quot;: &#123;</span><br><span class="line">            &quot;Effect&quot;: &quot;Allow&quot;,</span><br><span class="line">            &quot;Action&quot;: &quot;s3:*&quot;,</span><br><span class="line">            &quot;Resource&quot;: &quot;arn:aws:s3:::*&quot;</span><br><span class="line">        &#125;</span><br><span class="line">    &#125;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta">#</span><span class="bash">5.从keycloak中获取access_token</span></span><br><span class="line">function get_token_from_keycloak()&#123;</span><br><span class="line">KC_REALM=demo</span><br><span class="line">KC_CLIENT=&quot;app-profile-jsp&quot;</span><br><span class="line">KC_CLIENT_SECRET=&quot;126ee791-82f9-4c0d-8fd7-a6be1eea972d&quot;</span><br><span class="line">KC_SERVER=$KEYCLOAK_SERVER</span><br><span class="line">KC_CONTEXT=auth</span><br><span class="line"><span class="meta"></span></span><br><span class="line"><span class="meta">#</span><span class="bash"> Request Tokens <span class="keyword">for</span> credentials</span></span><br><span class="line"><span class="meta">#</span><span class="bash">KC_RESPONSE=$( \</span></span><br><span class="line"><span class="bash">curl -k -v -X POST \</span></span><br><span class="line"><span class="bash">-H <span class="string">&quot;Content-Type: application/x-www-form-urlencoded&quot;</span> \</span></span><br><span class="line"><span class="bash">-d <span class="string">&quot;scope=openid&quot;</span> \</span></span><br><span class="line"><span class="bash">-d <span class="string">&quot;grant_type=client_credentials&quot;</span> \</span></span><br><span class="line"><span class="bash">-d <span class="string">&quot;client_id=<span class="variable">$KC_CLIENT</span>&quot;</span> \</span></span><br><span class="line"><span class="bash">-d <span class="string">&quot;client_secret=<span class="variable">$KC_CLIENT_SECRET</span>&quot;</span> \</span></span><br><span class="line"><span class="bash"><span class="string">&quot;http://<span class="variable">$KC_SERVER</span>/<span class="variable">$KC_CONTEXT</span>/realms/<span class="variable">$KC_REALM</span>/protocol/openid-connect/token&quot;</span> \</span></span><br><span class="line"><span class="bash">| jq .</span></span><br><span class="line"><span class="meta">#</span><span class="bash">)</span></span><br><span class="line"><span class="meta"></span></span><br><span class="line"><span class="meta">#</span><span class="bash"><span class="built_in">echo</span> <span class="string">&quot;<span class="variable">$KC_RESPONSE</span>&quot;</span></span></span><br><span class="line"><span class="meta">#</span><span class="bash">KC_ACCESS_TOKEN=$(<span class="built_in">echo</span> <span class="variable">$KC_RESPONSE</span>| jq -r .access_token)</span></span><br><span class="line"><span class="meta">#</span><span class="bash"><span class="built_in">echo</span> <span class="string">&quot;<span class="variable">$KC_ACCESS_TOKEN</span>&quot;</span></span></span><br><span class="line">&#125;</span><br><span class="line"><span class="meta"></span></span><br><span class="line"><span class="meta">#</span><span class="bash">6. 角色扮演</span></span><br><span class="line">function  assume_role_with_web_identity()&#123;</span><br><span class="line">    aws sts --endpoint-url $RGW_ENDPOINT \</span><br><span class="line">    assume-role-with-web-identity \</span><br><span class="line">        --duration-seconds 3600 \</span><br><span class="line">        --role-session-name &quot;app1&quot; \</span><br><span class="line">        --provider-id &quot;http://9.134.3.72:8080/auth/realms/demo&quot; \</span><br><span class="line">        --role-arn &quot;arn:aws:iam:::role/S3Access&quot; \</span><br><span class="line">       --web-identity-token   &quot;eyJhbGciOiJSUzI1NiIsInR5cCIgOiAiSldUIiwia2lkIiA6ICJRNW9jZGwzakIxcGltYUljbUltXzdHNW82NWlub3poWERVS2dNY05NajNNIn0.eyJleHAiOjE2MjQ4MDU2MDYsImlhdCI6MTYyNDc2OTYwNiwianRpIjoiNzE4MmQyMzAtYTIxOC00YWM0LTlkMzktNTVkNmFhY2U3N2Q1IiwiaXNzIjoiaHR0cDovLzkuMTM0LjMuNzI6ODA4MC9hdXRoL3JlYWxtcy9kZW1vIiwiYXVkIjoiYWNjb3VudCIsInN1YiI6IjI5NmJiYTc5LTVlZDctNDI5MS05YzkwLTliNTQyYTIyZjU5MSIsInR5cCI6IkJlYXJlciIsImF6cCI6ImFwcC1wcm9maWxlLWpzcCIsImFjciI6IjEiLCJyZWFsbV9hY2Nlc3MiOnsicm9sZXMiOlsiczNBY2Nlc3MiLCJvZmZsaW5lX2FjY2VzcyIsImRlZmF1bHQtcm9sZXMtZGVtbyIsInVtYV9hdXRob3JpemF0aW9uIl19LCJyZXNvdXJjZV9hY2Nlc3MiOnsiYWNjb3VudCI6eyJyb2xlcyI6WyJtYW5hZ2UtYWNjb3VudCIsIm1hbmFnZS1hY2NvdW50LWxpbmtzIiwidmlldy1wcm9maWxlIl19fSwic2NvcGUiOiJvcGVuaWQgZW1haWwgcHJvZmlsZSIsImNsaWVudElkIjoiYXBwLXByb2ZpbGUtanNwIiwiY2xpZW50SG9zdCI6IjkuMjE4LjIyNS4yOSIsImVtYWlsX3ZlcmlmaWVkIjpmYWxzZSwicHJlZmVycmVkX3VzZXJuYW1lIjoic2VydmljZS1hY2NvdW50LWFwcC1wcm9maWxlLWpzcCIsImNsaWVudEFkZHJlc3MiOiI5LjIxOC4yMjUuMjkifQ.QvWI4CGKzf5bCTXzrvTDXbSM6jiqE7edpqww3U3lG8nhL_H6SY48kv8W_jOoliXeXsJxQTYEqToqjw75Mc9x8cQraREOZfu5o8yYqw4OqnSbFawtorUL_Q-04YGPiTuvR8dfWWOENN_R3Ghkp-hd93P2-Kbr7l9HmQ5CV9iW5Xs2we5KizPjRyv41yCBiBAqIM7t5LstZ2nC7wufmTOC2u8Qp73wbEsHYTZR-Wcrv9rykac_Vuu5eIPBfPk9QnxbiqyjwLdGlVGGOpuZcKAMjPfblUTLuaFH7a5dNLSAZjDfm3qkuRbOQr7P39IdZwe5qjEgzsw7UxeLR0ph0vUCqA&quot;</span><br><span class="line">&#125; </span><br><span class="line">&#123;</span><br><span class="line">    &quot;Credentials&quot;: &#123;</span><br><span class="line">        &quot;AccessKeyId&quot;: &quot;2VGzTX7oKCyfeYy3ubS&quot;,</span><br><span class="line">        &quot;SecretAccessKey&quot;: &quot;3N7GA5QC2PQGH1COVOQC2AOY3T93RXHSPFYVYVQ&quot;,</span><br><span class="line">        &quot;SessionToken&quot;: &quot;BN2ldOClw0uSn2WcxwZnz5hHUhuzOU89jltmcCduBS+iRaTb7gRmzu+cYKHdrZ2KyDhOC+Kn3j5F9VSB2f/5kGAqWE55tHBekP+FdWQDkx0nY5fXGNn2mpPe8G/9m5Z12xNHDAvRDlbbsgnrGYHb9ckSc/YVSG0OOiNGTBX8tP4kG0+YlW0yj+OqeeJCrpl6Jog9gBFLSe3eIdatvzi7if0EFIoSdFN5JkVAY9aQ4QPhrJG6lXMl62fxIVbk+x13cCZiStg1gumlaGnreJO7Lea5iMgF4xBI9vZLKNIv1EKehtRUDdtTsauYzmIGGGqGZTjctqyu25mxXXpSYVfN0cxOuxviBOeJF66vJBV5vCdq2DPeAVgjVw/RU6XDQy9CLrA/cJGO6+hI0f1ObBYO+Ou926+S4Ta/sGXBwSVWbhEclcTXqJiObdeIbJICrQtM&quot;,</span><br><span class="line">        &quot;Expiration&quot;: &quot;2021-06-27T06:43:21.885113+00:00&quot;</span><br><span class="line">    &#125;,</span><br><span class="line">    &quot;SubjectFromWebIdentityToken&quot;: &quot;296bba79-5ed7-4291-9c90-9b542a22f591&quot;,</span><br><span class="line">    &quot;AssumedRoleUser&quot;: &#123;</span><br><span class="line">        &quot;Arn&quot;: &quot;arn:aws:sts:::assumed-role/S3Access/app1&quot;</span><br><span class="line">    &#125;,</span><br><span class="line">    &quot;PackedPolicySize&quot;: 0,</span><br><span class="line">    &quot;Provider&quot;: &quot;&quot;,</span><br><span class="line">    &quot;Audience&quot;: &quot;account&quot;</span><br><span class="line">&#125;</span><br><span class="line"><span class="meta"></span></span><br><span class="line"><span class="meta">#</span><span class="bash">7.使用tmpAK/tmpSK/token操作ceph</span></span><br><span class="line">import boto3</span><br><span class="line"></span><br><span class="line">endpoint=&quot;http://9.134.3.72:8000&quot;</span><br><span class="line">tmpAk=&quot;2VGzTX7oKCyfeYy3ubS&quot;</span><br><span class="line">tmpSk=&quot;3N7GA5QC2PQGH1COVOQC2AOY3T93RXHSPFYVYVQ&quot;</span><br><span class="line">sessionToken=&quot;BN2ldOClw0uSn2WcxwZnz5hHUhuzOU89jltmcCduBS+iRaTb7gRmzu+cYKHdrZ2KyDhOC+Kn3j5F9VSB2f/5kGAqWE55tHBekP+FdWQDkx0nY5fXGNn2mpPe8G/9m5Z12xNHDAvRDlbbsgnrGYHb9ckSc/YVSG0OOiNGTBX8tP4kG0+YlW0yj+OqeeJCrpl6Jog9gBFLSe3eIdatvzi7if0EFIoSdFN5JkVAY9aQ4QPhrJG6lXMl62fxIVbk+x13cCZiStg1gumlaGnreJO7Lea5iMgF4xBI9vZLKNIv1EKehtRUDdtTsauYzmIGGGqGZTjctqyu25mxXXpSYVfN0cxOuxviBOeJF66vJBV5vCdq2DPeAVgjVw/RU6XDQy9CLrA/cJGO6+hI0f1ObBYO+Ou926+S4Ta/sGXBwSVWbhEclcTXqJiObdeIbJICrQtM&quot;</span><br><span class="line">s3client = boto3.client(&#x27;s3&#x27;,</span><br><span class="line">aws_access_key_id = tmpAk,</span><br><span class="line">aws_secret_access_key = tmpSk,</span><br><span class="line">aws_session_token = sessionToken,</span><br><span class="line">endpoint_url=endpoint,</span><br><span class="line">region_name=&#x27;chongqing&#x27;,)</span><br><span class="line"></span><br><span class="line">bucket_name = &#x27;my-bucket&#x27;</span><br><span class="line"><span class="meta">#</span><span class="bash">s3bucket = s3client.create_bucket(Bucket=bucket_name)</span></span><br><span class="line">s3client.list_buckets()</span><br><span class="line">resp = s3client.list_buckets()</span><br><span class="line">print(resp)</span><br></pre></td></tr></table></figure>
+
+<p><strong>AssumeRoleWithWebIdentity抓包</strong></p>
+<p>只看ceph的示例，容易进入“AssumeRoleWithWebIdentity还需要一个rgw用户的ak/sk”的误区，从而错误地认为在终端用户角色扮演的时候也需要创建一个rgw用户。实际上是不需要的，可以通过抓包来确认：</p>
+<p>可以发现传入的只有如下几个关键字段：</p>
+<ol>
+<li>RoleArn：在rgw中创建的Role的ARN，此处为<code>arn:aws:iam:::role/S3Access</code>。</li>
+<li>WebIdentityToken：从OIDC Provider登录后，获得的已经通过验证的token。</li>
+<li>ProviderID：OIDC Provider的ID，主要由其地址和realms构成</li>
+<li>DurationSeconds：有效期</li>
+</ol>
+<img src=".STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/image-20210627183813161.png" alt="image-20210627183813161" style="zoom:33%;" />
+
+<h2 id="代码分析：角色扮演"><a href="#代码分析：角色扮演" class="headerlink" title="代码分析：角色扮演"></a>代码分析：角色扮演</h2><p>在rgw中，主要流程如下所示：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br></pre></td><td class="code"><pre><span class="line">//主要包括iss, aud, sub, client_id(此处为app-profile-jsp）, role_arn, provider, thumbprints(此处为AC9F85A386436B9EF71B0B2036AAA0E7273B59F1），</span><br><span class="line">/*</span><br><span class="line">sub = &quot;296bba79-5ed7-4291-9c90-9b542a22f591&quot;,</span><br><span class="line">aud = &quot;account&quot;,</span><br><span class="line">iss = &quot;http://9.134.3.72:8080/auth/realms/demo&quot;,</span><br><span class="line">user_name = &quot;&quot;,</span><br><span class="line">client_id = &quot;app-profile-jsp&quot;</span><br><span class="line">*/</span><br></pre></td></tr></table></figure>
+
+
+
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br><span class="line">38</span><br><span class="line">39</span><br><span class="line">40</span><br><span class="line">41</span><br><span class="line">42</span><br><span class="line">43</span><br><span class="line">44</span><br><span class="line">45</span><br><span class="line">46</span><br><span class="line">47</span><br><span class="line">48</span><br><span class="line">49</span><br><span class="line">50</span><br><span class="line">51</span><br><span class="line">52</span><br><span class="line">53</span><br><span class="line">54</span><br><span class="line">55</span><br><span class="line">56</span><br><span class="line">57</span><br><span class="line">58</span><br><span class="line">59</span><br><span class="line">60</span><br><span class="line">61</span><br><span class="line">62</span><br></pre></td><td class="code"><pre><span class="line">process_request</span><br><span class="line">RGWOp::verify_requester</span><br><span class="line">RGWHandler_REST_S3::authorize</span><br><span class="line">RGW_Auth_STS::authorize </span><br><span class="line">rgw::auth::Strategy::apply</span><br><span class="line">rgw::auth::Strategy::authenticate</span><br><span class="line">rgw::auth::sts::WebTokenEngine::authenticate</span><br><span class="line">	-&gt; WebTokenEngine::get_from_jwt </span><br><span class="line">    <span class="comment">//decode token	</span></span><br><span class="line">    rgw::auth::sts::WebTokenEngine::get_provider</span><br><span class="line">    RGWOIDCProvider::get</span><br><span class="line">    RGWOIDCProvider::read_url</span><br><span class="line">  		--&gt; <span class="keyword">auto</span>&amp; pool = svc-&gt;zone-&gt;<span class="built_in">get_zone_params</span>().oidc_pool; </span><br><span class="line">			--&gt; string oid = tenant + <span class="built_in">get_url_oid_prefix</span>() + url;</span><br><span class="line">      --&gt; <span class="keyword">int</span> ret = <span class="built_in">rgw_get_system_obj</span>(obj_ctx, pool, oid, bl, <span class="literal">NULL</span>, <span class="literal">NULL</span>, null_yield); </span><br><span class="line"></span><br><span class="line"></span><br><span class="line">  <span class="built_in">is_client_id_valid</span>(client_ids, t.client_id)</span><br><span class="line">  <span class="built_in">is_client_id_valid</span>(client_ids, t.aud)</span><br><span class="line">  <span class="built_in">validate_signature</span>(dpp, decoded, algorithm, t.iss, thumbprints);<span class="comment">//根据指纹值校验签   		名,向keycloak发送GET请求，解析相关字段进行校验。uri如下：</span></span><br><span class="line">	<span class="comment">/*</span></span><br><span class="line"><span class="comment">	cert_url = http://9.134.3.72:8080/auth/realms/demo/protocol/openid-connect/certs</span></span><br><span class="line"><span class="comment">	*/</span></span><br><span class="line">	<span class="keyword">auto</span> apl = apl_factory-&gt;<span class="built_in">create_apl_web_identity</span>(cct, s, role_session, *t);</span><br><span class="line">	<span class="keyword">return</span> <span class="keyword">result_t</span>::<span class="built_in">grant</span>(std::<span class="built_in">move</span>(apl));  </span><br><span class="line">applier-&gt;<span class="built_in">modify_request_state</span>(dpp, s);   </span><br><span class="line">-&gt;rgw::auth::WebIdentityApplier::modify_request_state <span class="comment">//将sub,aud,provider_id,client_id添加到s-&gt;info.args中，condition由&quot;9.134.3.72:8080/auth/realms/demo:app_id&quot;变为&quot;9.134.3.72:8080/auth/realms/demo:sub&quot; //?</span></span><br><span class="line">  </span><br><span class="line"></span><br><span class="line">RGWREST_STS::verify_permission  </span><br><span class="line">  -&gt; string rArn = s-&gt;info.args.<span class="built_in">get</span>(<span class="string">&quot;RoleArn&quot;</span>); <span class="comment">//从header中的RoleArn解析得到arn</span></span><br><span class="line">  -&gt; <span class="keyword">const</span> <span class="keyword">auto</span>&amp; [ret, role] = sts.<span class="built_in">getRoleInfo</span>(rArn);<span class="comment">//根据arn，从rgw本地获得role详情 </span></span><br><span class="line">  -&gt; string policy = role.<span class="built_in">get_assume_role_policy</span>();<span class="comment">//获得本地设置的policy</span></span><br><span class="line">  -&gt; <span class="keyword">const</span> rgw::<span class="function">IAM::Policy <span class="title">p</span><span class="params">(s-&gt;cct, s-&gt;user-&gt;get_tenant(), bl)</span></span>;<span class="comment">//根据policy创建p</span></span><br><span class="line">  -&gt; <span class="keyword">auto</span> p_res = p.<span class="built_in">eval_principal</span>(s-&gt;env, *s-&gt;auth.identity);<span class="comment">//检查header中的arn可以在本地的Principals中找到，否则-EPERM</span></span><br><span class="line">  -&gt; <span class="keyword">auto</span> c_res = p.<span class="built_in">eval_conditions</span>(s-&gt;env);  <span class="comment">//检查condition符合，即policy中设置的条件</span></span><br><span class="line"></span><br><span class="line"></span><br><span class="line">RGWSTSAssumeRoleWithWebIdentity::<span class="built_in">execute</span>() &#123;</span><br><span class="line">  <span class="comment">//1. new一个req，传入相关参数</span></span><br><span class="line">  <span class="function">STS::AssumeRoleWithWebIdentityRequest <span class="title">req</span><span class="params">(duration, providerId, policy, roleArn,</span></span></span><br><span class="line"><span class="params"><span class="function">                        roleSessionName, iss, sub, aud)</span></span>;</span><br><span class="line">  <span class="comment">//2. 角色扮演,生成临时密钥</span></span><br><span class="line">  STS::AssumeRoleWithWebIdentityResponse response = sts.<span class="built_in">assumeRoleWithWebIdentity</span>(req);</span><br><span class="line">  <span class="comment">//2.1 根据role信息，创建 Assumed Role User</span></span><br><span class="line">  AssumedRoleUser::<span class="built_in">generateAssumedRoleUser</span>(CephContext* cct,</span><br><span class="line">                                              rgw::sal::RGWRadosStore *store,</span><br><span class="line">                                              <span class="keyword">const</span> string&amp; roleId,</span><br><span class="line">                                              <span class="keyword">const</span> rgw::ARN&amp; roleArn,</span><br><span class="line">                                              <span class="keyword">const</span> string&amp; roleSessionName)</span><br><span class="line"></span><br><span class="line">  <span class="comment">//2.2 生成认证信息tmpAk/tmpSk,将policy,roleId,user等信息存入token中，用于在使用时传递权限信息</span></span><br><span class="line">  <span class="comment">//Role and Policy provide the authorization info, user id and applier info are not needed</span></span><br><span class="line">  Credentials::<span class="built_in">generateCredentials</span>(CephContext* cct,</span><br><span class="line">                          <span class="keyword">const</span> <span class="keyword">uint64_t</span>&amp; duration,</span><br><span class="line">                          <span class="keyword">const</span> boost::optional&lt;string&gt;&amp; policy,</span><br><span class="line">                          <span class="keyword">const</span> boost::optional&lt;string&gt;&amp; roleId,</span><br><span class="line">                          <span class="keyword">const</span> boost::optional&lt;string&gt;&amp; role_session,</span><br><span class="line">                          <span class="keyword">const</span> boost::optional&lt;std::vector&lt;string&gt;&gt; token_claims,</span><br><span class="line">                          boost::optional&lt;rgw_user&gt; user,</span><br><span class="line">                          rgw::auth::Identity* identity)</span><br><span class="line">&#125;</span><br></pre></td></tr></table></figure>
+
+<p>rgw从keycloak获取certs进行认证抓包：</p>
+<p><code>WebTokenEngine::validate_signature()</code></p>
+<img src=".STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/image-20210627231303457.png" alt="image-20210627231303457" style="zoom:33%;" />
+
+<h2 id="代码分析：使用临时密钥操作rgw"><a href="#代码分析：使用临时密钥操作rgw" class="headerlink" title="代码分析：使用临时密钥操作rgw"></a>代码分析：使用临时密钥操作rgw</h2><img src=".STS%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5.assets/image-20210627183433955.png" alt="image-20210627183433955" style="zoom:33%;" />
+
+<p>此时的认证便是通过上面角色扮演得到的tmpAk,tmpSk和token来进行的。在rgw中，是通过新增一个WebTokenEngine来进行认证。</p>
+<figure class="highlight c++"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br><span class="line">11</span><br><span class="line">12</span><br><span class="line">13</span><br><span class="line">14</span><br><span class="line">15</span><br><span class="line">16</span><br><span class="line">17</span><br><span class="line">18</span><br><span class="line">19</span><br><span class="line">20</span><br><span class="line">21</span><br><span class="line">22</span><br><span class="line">23</span><br><span class="line">24</span><br><span class="line">25</span><br><span class="line">26</span><br><span class="line">27</span><br><span class="line">28</span><br><span class="line">29</span><br><span class="line">30</span><br><span class="line">31</span><br><span class="line">32</span><br><span class="line">33</span><br><span class="line">34</span><br><span class="line">35</span><br><span class="line">36</span><br><span class="line">37</span><br></pre></td><td class="code"><pre><span class="line">process_request</span><br><span class="line">RGWOp::verify_requester </span><br><span class="line">RGWHandler_REST_S3::authorize</span><br><span class="line">RGW_Auth_S3::authorize</span><br><span class="line">rgw::auth::Strategy::apply</span><br><span class="line">   rgw::auth::Strategy::authenticate</span><br><span class="line">  		rgw::auth::s3::STSEngine:::<span class="built_in">authenticate</span>()</span><br><span class="line">        --&gt; <span class="built_in">get_session_token</span>(dpp, session_token, token)</span><br><span class="line">        --&gt; expiration </span><br><span class="line">        --&gt; signature compare</span><br><span class="line">        --&gt; r.role_policies.<span class="built_in">push_back</span>(std::<span class="built_in">move</span>(perm_policy));</span><br><span class="line">        --&gt; role_apl_factory-&gt;<span class="built_in">create_apl_role</span>()<span class="comment">//token.acct_type == TYPE_ROLE</span></span><br><span class="line">        --&gt; <span class="keyword">result_t</span>::<span class="built_in">grant</span>(std::<span class="built_in">move</span>(apl),</span><br><span class="line">                           <span class="built_in">completer_factory</span>(token.secret_access_key)</span><br><span class="line">rgw::auth::SysReqApplier&lt;rgw::auth::RoleApplier&gt;::modify_request_state</span><br><span class="line">rgw::auth::DecoratedApplier&lt;rgw::auth::RoleApplier&gt;::modify_request_state</span><br><span class="line">rgw::auth::RoleApplier::modify_request_state</span><br><span class="line">  --&gt; <span class="keyword">const</span> rgw::IAM::Policy <span class="built_in">p</span>(s-&gt;cct, role.tenant, bl);</span><br><span class="line">  --&gt; s-&gt;iam_user_policies.<span class="built_in">push_back</span>(std::<span class="built_in">move</span>(p)); <span class="comment">//将role的policy赋给iam_user_policies,将在后续的具体Op中鉴权user policy</span></span><br><span class="line">...</span><br><span class="line">rgw_process_authenticated</span><br><span class="line">  RGWHandler_REST::init_permissions</span><br><span class="line">  RGWHandler::do_init_permissions</span><br><span class="line">  rgw_build_iam_environment</span><br><span class="line">  --&gt; s-&gt;env.<span class="built_in">emplace</span>(<span class="string">&quot;sts:authentication&quot;</span>, <span class="string">&quot;true&quot;</span>);</span><br><span class="line">  <span class="comment">//https://github.com/ceph/ceph/commit/846ef951de09465a902e30f0f50f82fd70b809e7</span></span><br><span class="line">  <span class="comment">//没看到有甚么作用</span></span><br><span class="line">  RGWPutObj::verify_permission</span><br><span class="line">    <span class="keyword">if</span> (s-&gt;iam_policy || ! s-&gt;iam_user_policies.<span class="built_in">empty</span>()) &#123; </span><br><span class="line">      ...</span><br><span class="line">      <span class="comment">//通过user policy鉴权</span></span><br><span class="line">    	<span class="keyword">auto</span> usr_policy_res = <span class="built_in">eval_user_policies</span>(s-&gt;iam_user_policies, s-&gt;env,</span><br><span class="line">                                            boost::none,</span><br><span class="line">                                            rgw::IAM::s3PutObject,</span><br><span class="line">                                            <span class="built_in">rgw_obj</span>(s-&gt;bucket, s-&gt;object));</span><br><span class="line">			...</span><br><span class="line">    &#125;</span><br></pre></td></tr></table></figure>
+
+<h2 id="附录"><a href="#附录" class="headerlink" title="附录"></a>附录</h2><h3 id="auth类图（部分）："><a href="#auth类图（部分）：" class="headerlink" title="auth类图（部分）："></a>auth类图（部分）：</h3><pre class="mermaid">classDiagram
+Identity <|-- IdentityApplier
+IdentityApplier <|-- WebIdentityApplier
+IdentityApplier <|-- RoleApplier
+IdentityApplier <|-- LocalApplier
+IdentityApplier <|-- RemoteApplier
+
+
+class IdentityApplier{
+ +std::unique_ptr<IdentityApplier> aplptr_t;
+ +void load_acct_info();
+ +void modify_request_state();
+}
+
+class WebIdentityApplier{
+  CephContext* const cct;
+  RGWCtl* const ctl;
+  string role_session;
+  rgw::web_idp::WebTokenClaims token_claims;
+
+  string get_idp_url() const;
+  +void modify_request_state();
+  +bool is_admin_of();
+  +bool is_owner_of();
+  +uint32_t get_identity_type();
+  string get_acct_name() const override;
+}
+class RoleApplier{
+Role.id
+Role.name
+Role.tenant
+Role.role_policies
+
+rgw_user user_id;
+string token_policy
+string role_session_name;
+std::vector<string> token_claims;
+is_identity()
+get_identity_type()
+modify_request_state()
+Factory.create_apl_role()
+}
+class RemoteApplier{
+...
+}
+class LocalApplier{
+...
+}
+
+Engine <|--Strategy
+Engine <|-- WebTokenEngine
+Engine <|-- AWSEngine
+Engine <|-- AnonymousEngine
+
+AWSEngine <|-- STSEngine
+AWSEngine <|-- LDAPEngine
+AWSEngine <|-- LocalEngine
+AWSEngine <|-- RemoteEngine
+
+Strategy <|-- STSAuthStrategy
+Strategy <|-- DefaultStrategy
+WebIdentityApplier <|-- DefaultStrategy
+RemoteApplier <|-- STSAuthStrategy
+LocalApplier <|-- STSAuthStrategy
+RoleApplier <|-- STSAuthStrategy
+
+class Engine{
+Status.DENIED
+Status.GRANTED
+Status.REJECTED
+
++reject()
++deny()
++grant()
++authenticated()
+}
+
+class AWSEngine{
+struct auth_data_t
++get_auth_data()
+-CephContext* cct;
++authenticate()
+}
+
+class STSEngine{
+LocalApplier local_apl_factory
+RemoteApplier remote_apl_factory
+RoleApplier role_apl_factory
++get_acl_strategy()
++get_creds_info()
++get_session_token()
++authenticate()
+
+}
+class WebTokenEngine{
+WebIdentityApplier* apl_factory;
++is_applicable()
++is_client_id_valid()
++is_cert_valid()
++get_from_jwt()
++validate_signature()
++authenticate()
+}
+
+class LDAPEngine{
+...
+}
+
+class LocalEngine{
+...
+}
+class RemoteEngine{
+...
+}
+class AnonymousEngine{
+...
+}
+
+class Strategy{
+-std::vector<stack_item_t> auth_stack;//认证栈
+apply()
++authenticate();
+add_engine();
+}
+
+class STSAuthStrategy{
+STSEngine  sts_engine;
++create_apl_remote()
++create_apl_local()
++create_apl_role()
+}
+
+class DefaultStrategy{
+WebTokenEngine web_token_engine;
+string get_token()
+create_apl_web_identity()
+add_engine()
+}</pre>
+
+
+
+<h3 id="rgw与keycloak部署"><a href="#rgw与keycloak部署" class="headerlink" title="rgw与keycloak部署"></a>rgw与keycloak部署</h3><p>keycloak官网：<a target="_blank" rel="noopener" href="https://www.keycloak.org/documentation">https://www.keycloak.org/documentation</a></p>
+<p><a target="_blank" rel="noopener" href="https://www.keycloak.org/docs/latest/getting_started/index.html">https://www.keycloak.org/docs/latest/getting_started/index.html</a></p>
+<h4 id="安装keycloak"><a href="#安装keycloak" class="headerlink" title="安装keycloak"></a>安装keycloak</h4><p>下载keycloak安装包</p>
+<p>启动keycloak服务器</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br></pre></td><td class="code"><pre><span class="line">进入keycloak目录，可以指定ip和port、或port偏移（基于8080端口）：</span><br><span class="line"><span class="meta">#</span><span class="bash"> 指定端口 -Djboss.http.port=9080</span></span><br><span class="line"><span class="meta">#</span><span class="bash">./bin/standalone.sh  -Djboss.bind.address.management=192.168.56.203 -Djboss.bind.address=192.168.56.203 -Djboss.socket.binding.port-offset=100</span></span><br><span class="line"><span class="meta"></span></span><br><span class="line"><span class="meta">#</span><span class="bash">编译机中，允许从外网访问http://www.emptyrealm.com/archives/3</span></span><br><span class="line">./bin/standalone.sh -b 0.0.0.0</span><br></pre></td></tr></table></figure>
+
+<p>创建admin用户：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">浏览器进入http://9.134.3.72:8080/auth调用./bin/add-user-keycloak.sh -u admin</span><br></pre></td></tr></table></figure>
+
+<p>管理员控制台：<a target="_blank" rel="noopener" href="http://9.134.3.72:8080/auth">http://9.134.3.72:8080/auth</a></p>
+<p>创建一个realm: demo，并进入该realm。</p>
+<p>创建用户：<code>./bin/add-user.sh</code>或在界面上进行</p>
+<p>查看keycloak的日志，发现目前监听端口为9990：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">10:11:58,792 INFO  [org.jboss.as] (Controller Boot Thread) WFLYSRV0051: Admin console listening on http://127.0.0.1:9990</span><br></pre></td></tr></table></figure>
+
+<p><del>于是据此修改keycloak-13.0.0/bin/jboss-cli.xml：</del></p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">default-controller</span>&gt;</span>  <span class="tag">&lt;<span class="name">protocol</span>&gt;</span>remote+http<span class="tag">&lt;/<span class="name">protocol</span>&gt;</span>  <span class="tag">&lt;<span class="name">host</span>&gt;</span>192.168.56.203<span class="tag">&lt;/<span class="name">host</span>&gt;</span>  <span class="tag">&lt;<span class="name">port</span>&gt;</span>9990<span class="tag">&lt;/<span class="name">port</span>&gt;</span><span class="tag">&lt;/<span class="name">default-controller</span>&gt;</span></span><br></pre></td></tr></table></figure>
+
+<p>访问时SSL问题：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">访问http://ip:8080/auth/admin时会重定向到http://ip:8080/auth/realms/master/protocol/openid-connect/auth?client_id=security-admin-console 然后提示HTTPS required明明用的是http访问，怎么会报https的错误，去google了一下资料，发现keyclocak在外网访问的情况下，会强制使用https访问，查到一个解决方案：./bin/kcadm.sh config credentials --server http://localhost:8080/auth --realm master --user admin./bin/kcadm.sh update realms/master -s sslRequired=NONE#同时需要更新client坐在的relam的sslRequired=NONE./bin/kcadm.sh update realms/demo -s sslRequired=NONE</span><br></pre></td></tr></table></figure>
+
+<h4 id="安装keycloak-oidc-wildfly-adapter-13"><a href="#安装keycloak-oidc-wildfly-adapter-13" class="headerlink" title="安装keycloak-oidc-wildfly-adapter-13:"></a>安装keycloak-oidc-wildfly-adapter-13:</h4><p>下载keycloak-oidc-wildfly-adapter-13:并解压到keycloak-13.0.0/下，并且将其中的modules/拷贝到keycloak-13.0.0/下。</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">./bin/jboss-cli.sh -c --file=keycloak-oidc-wildfly-adapter-13/bin/adapter-elytron-install.cli</span><br></pre></td></tr></table></figure>
+
+<p>安装成功后将提示：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&#123;&quot;outcome&quot; =&gt; &quot;success&quot;&#125;&#123;    &quot;outcome&quot; =&gt; &quot;success&quot;,    &quot;response-headers&quot; =&gt; &#123;        &quot;operation-requires-reload&quot; =&gt; true,        &quot;process-state&quot; =&gt; &quot;reload-required&quot;    &#125;&#125;&#123;    &quot;outcome&quot; =&gt; &quot;success&quot;,    &quot;response-headers&quot; =&gt; &#123;&quot;process-state&quot; =&gt; &quot;reload-required&quot;&#125;&#125;</span><br></pre></td></tr></table></figure>
+
+<p>可以看到<code>process-state</code>为<code>reload-required</code>。之后reload一下keycloak server:</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">[root@node03 keycloak-13.0.0]# ./bin/jboss-cli.sh -c --command=:reload&#123;    &quot;outcome&quot; =&gt; &quot;success&quot;,    &quot;result&quot; =&gt; undefined&#125;</span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p> 此时可以注意到keycloak server有日志滚动。</p>
+</blockquote>
+<h4 id="在keycloak中创建client"><a href="#在keycloak中创建client" class="headerlink" title="在keycloak中创建client"></a>在keycloak中创建client</h4><p>指定为app-profile-jsp,修改 Client Protocol为openid-connect，修改Access Type为confidential，打开Service Account Enabled选项卡。切换到Installation选项卡，选择Format Option为Keycloak OIDC JSON，拷贝（或下载）为keycloak.json，将其拷贝到keycloak-quickstarts/app-profile-jee-jsp/config中。</p>
+<blockquote>
+<p>==注意：官网说明是放到keycloak-quickstarts/app-profile-jee-jsp/src/main/webapp/下，这是错误的！！！==</p>
+</blockquote>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">&#123;  &quot;realm&quot;: &quot;demo&quot;,  &quot;auth-server-url&quot;: &quot;http://9.134.3.72:8080/auth/&quot;,  &quot;ssl-required&quot;: &quot;none&quot;,  &quot;resource&quot;: &quot;app-profile-jsp&quot;,  &quot;credentials&quot;: &#123;    &quot;secret&quot;: &quot;126ee791-82f9-4c0d-8fd7-a6be1eea972d&quot;  &#125;,  &quot;confidential-port&quot;: 0&#125;</span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p>附录：若设置ssl-required: external时,在点击登录时报错：Adapter requires SSL：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">01:37:47,573 ERROR [org.keycloak.adapters.OAuthRequestAuthenticator] (default task-1) Adapter requires SSL. Request: http://9.134.3.72:8080/app-profile-jsp/profile.jsp?state=d57c0d69-39fa-4635-b680-b945a74361a8&amp;session_state=66bf768a-867a-4dac-a9f9-d49383eeac33&amp;code=ad43ff24-678f-46b3-b4eb-1edbf029d8d1.66bf768a-867a-4dac-a9f9-d49383eeac33.4e687a5b-baf6-4142-b228-4b9c619ce3d2</span><br></pre></td></tr></table></figure>
+</blockquote>
+<p>可以获得的是clientID: app-profile-jsp, secret: 0ffa9571-f9f5-413a-8668-dc07e02e55b1, 将在后续用于认证。</p>
+<p>一个realm中可以有多个Clients，也可以有多个Users，而Users与Clients之间是不强制绑定的，这样</p>
+<h4 id="启动应用app-profile-jee-jsp"><a href="#启动应用app-profile-jee-jsp" class="headerlink" title="启动应用app-profile-jee-jsp:"></a>启动应用app-profile-jee-jsp:</h4><p>参考：<a target="_blank" rel="noopener" href="https://github.com/keycloak/keycloak-quickstarts/blob/latest/app-profile-jee-jsp/README.md">https://github.com/keycloak/keycloak-quickstarts/blob/latest/app-profile-jee-jsp/README.md</a></p>
+<blockquote>
+<p>注意：文档中有几处错误：</p>
+<ol>
+<li>不需要wildfly，keycloak-13中已集成wildfly。因此安装keycloak-oidc-wildfly-adapter-13是放到keycloak目录下，而不是wildfly目录下，也无需额外下载wildfly。</li>
+</ol>
+<p>（安装应用时时Keycloak的日志有变化，wildfly的日志没有变化）</p>
+</blockquote>
+<p>在keycloak-quickstarts/app-profile-jee-jsp/下，执行：</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">mvn clean wildfly:deployormvn install -Dsubsystem wildfly:deploy</span><br></pre></td></tr></table></figure>
+
+<p>卸载</p>
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">mvn install wildfly:undeploy</span><br></pre></td></tr></table></figure>
+
+<blockquote>
+<p>此处需要mvn version 3.3.1以上。若yum源中没有高版本rpm，可以先安装yum源中的低版本，然后在官网上下载新版本，拷到server中，然后通过软连接的方式来使用： ln -s  /data/apache-maven-3.8.1/bin/mvn /usr/bin/mvn</p>
+</blockquote>
+<p>若为指定ip的情况，可以修改app-profile-jee-jsp pom.xml，手动配置hostname与port：</p>
+<p>pom.xml：</p>
+<figure class="highlight xml"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line"><span class="tag">&lt;<span class="name">build</span>&gt;</span>  <span class="tag">&lt;<span class="name">finalName</span>&gt;</span>app-jsp<span class="tag">&lt;/<span class="name">finalName</span>&gt;</span>  <span class="tag">&lt;<span class="name">plugins</span>&gt;</span>    <span class="tag">&lt;<span class="name">plugin</span>&gt;</span>      <span class="tag">&lt;<span class="name">groupId</span>&gt;</span>org.wildfly.plugins<span class="tag">&lt;/<span class="name">groupId</span>&gt;</span>      <span class="tag">&lt;<span class="name">artifactId</span>&gt;</span>wildfly-maven-plugin<span class="tag">&lt;/<span class="name">artifactId</span>&gt;</span>      <span class="tag">&lt;<span class="name">configuration</span>&gt;</span>        <span class="tag">&lt;<span class="name">skip</span>&gt;</span>false<span class="tag">&lt;/<span class="name">skip</span>&gt;</span>        <span class="tag">&lt;<span class="name">hostname</span>&gt;</span>192.168.56.203<span class="tag">&lt;/<span class="name">hostname</span>&gt;</span>        <span class="tag">&lt;<span class="name">port</span>&gt;</span>8080<span class="tag">&lt;/<span class="name">port</span>&gt;</span>      <span class="tag">&lt;/<span class="name">configuration</span>&gt;</span>    <span class="tag">&lt;/<span class="name">plugin</span>&gt;</span></span><br></pre></td></tr></table></figure>
+
+<figure class="highlight shell"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><span class="line">http://192.168.56.203:8080/auth/realms/demo/.well-known/openid-configuration</span><br></pre></td></tr></table></figure>
+
+
+    </div>
+
+    
+    
+    
+        
+
+  <div class="followme">
+    <p>欢迎关注我的其它发布渠道</p>
+
+    <div class="social-list">
+
+        <div class="social-item">
+          <a target="_blank" class="social-link" href="/atom.xml">
+            <span class="icon">
+              <i class="fa fa-rss"></i>
+            </span>
+
+            <span class="label">RSS</span>
+          </a>
+        </div>
+    </div>
+  </div>
+
+
+      <footer class="post-footer">
+          <div class="post-tags">
+              <a href="/tags/ceph/" rel="tag"># ceph</a>
+          </div>
+
+        
+
+
+        
+    <div class="post-nav">
+      <div class="post-nav-item">
+    <a href="/2021/09/05/%E5%88%86%E5%B8%83%E5%BC%8F%E7%B3%BB%E7%BB%9F%E5%AD%A6%E4%B9%A0%E5%A4%A7%E7%BA%B2/" rel="prev" title="分布式系统学习大纲">
+      <i class="fa fa-chevron-left"></i> 分布式系统学习大纲
+    </a></div>
+      <div class="post-nav-item">
+    <a href="/2021/09/11/aws-s3cli%E5%B8%B8%E7%94%A8%E5%8A%9F%E8%83%BD%E4%BB%8B%E7%BB%8D/" rel="next" title="aws s3cli常用功能介绍">
+      aws s3cli常用功能介绍 <i class="fa fa-chevron-right"></i>
+    </a></div>
+    </div>
+      </footer>
+    
+  </article>
+  
+  
+  
+
+
+
+          </div>
+          
+
+<script>
+  window.addEventListener('tabs:register', () => {
+    let { activeClass } = CONFIG.comments;
+    if (CONFIG.comments.storage) {
+      activeClass = localStorage.getItem('comments_active') || activeClass;
+    }
+    if (activeClass) {
+      let activeTab = document.querySelector(`a[href="#comment-${activeClass}"]`);
+      if (activeTab) {
+        activeTab.click();
+      }
+    }
+  });
+  if (CONFIG.comments.storage) {
+    window.addEventListener('tabs:click', event => {
+      if (!event.target.matches('.tabs-comment .tab-content .tab-pane')) return;
+      let commentClass = event.target.classList[1];
+      localStorage.setItem('comments_active', commentClass);
+    });
+  }
+</script>
+
+        </div>
+          
+  
+  <div class="toggle sidebar-toggle">
+    <span class="toggle-line toggle-line-first"></span>
+    <span class="toggle-line toggle-line-middle"></span>
+    <span class="toggle-line toggle-line-last"></span>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-inner">
+
+      <ul class="sidebar-nav motion-element">
+        <li class="sidebar-nav-toc">
+          文章目录
+        </li>
+        <li class="sidebar-nav-overview">
+          站点概览
+        </li>
+      </ul>
+
+      <!--noindex-->
+      <div class="post-toc-wrap sidebar-panel">
+          <div class="post-toc motion-element"><ol class="nav"><li class="nav-item nav-level-1"><a class="nav-link" href="#AssumeRoleWithWebIdentity"><span class="nav-number">1.</span> <span class="nav-text">AssumeRoleWithWebIdentity</span></a><ol class="nav-child"><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%8F%AF%E8%83%BD%E7%9A%84%E9%97%AE%E9%A2%98"><span class="nav-number">1.1.</span> <span class="nav-text">可能的问题</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E4%B8%BB%E8%A6%81%E4%BB%A3%E7%A0%81%E6%8F%90%E4%BA%A4"><span class="nav-number">1.2.</span> <span class="nav-text">主要代码提交</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%8F%82%E8%80%83%E6%96%87%E6%A1%A3"><span class="nav-number">1.3.</span> <span class="nav-text">参考文档</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#OIDC%E5%9F%BA%E6%9C%AC%E6%A6%82%E5%BF%B5"><span class="nav-number">1.4.</span> <span class="nav-text">OIDC基本概念</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#keycloak"><span class="nav-number">1.4.1.</span> <span class="nav-text">keycloak</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#realm"><span class="nav-number">1.4.1.1.</span> <span class="nav-text">realm</span></a></li></ol></li></ol></li><li class="nav-item nav-level-2"><a class="nav-link" href="#CEPH-STS%E4%B8%8EKeycloak%E4%BA%A4%E4%BA%92%E6%B5%81%E7%A8%8B"><span class="nav-number">1.5.</span> <span class="nav-text">CEPH STS与Keycloak交互流程</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E4%BA%A4%E4%BA%92%E6%B5%81%E7%A8%8B%E5%9B%BE"><span class="nav-number">1.6.</span> <span class="nav-text">交互流程图</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E5%AE%8C%E6%95%B4%E8%84%9A%E6%9C%AC%E7%A4%BA%E4%BE%8B"><span class="nav-number">1.7.</span> <span class="nav-text">完整脚本示例</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E4%BB%A3%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%9A%E8%A7%92%E8%89%B2%E6%89%AE%E6%BC%94"><span class="nav-number">1.8.</span> <span class="nav-text">代码分析：角色扮演</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E4%BB%A3%E7%A0%81%E5%88%86%E6%9E%90%EF%BC%9A%E4%BD%BF%E7%94%A8%E4%B8%B4%E6%97%B6%E5%AF%86%E9%92%A5%E6%93%8D%E4%BD%9Crgw"><span class="nav-number">1.9.</span> <span class="nav-text">代码分析：使用临时密钥操作rgw</span></a></li><li class="nav-item nav-level-2"><a class="nav-link" href="#%E9%99%84%E5%BD%95"><span class="nav-number">1.10.</span> <span class="nav-text">附录</span></a><ol class="nav-child"><li class="nav-item nav-level-3"><a class="nav-link" href="#auth%E7%B1%BB%E5%9B%BE%EF%BC%88%E9%83%A8%E5%88%86%EF%BC%89%EF%BC%9A"><span class="nav-number">1.10.1.</span> <span class="nav-text">auth类图（部分）：</span></a></li><li class="nav-item nav-level-3"><a class="nav-link" href="#rgw%E4%B8%8Ekeycloak%E9%83%A8%E7%BD%B2"><span class="nav-number">1.10.2.</span> <span class="nav-text">rgw与keycloak部署</span></a><ol class="nav-child"><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%AE%89%E8%A3%85keycloak"><span class="nav-number">1.10.2.1.</span> <span class="nav-text">安装keycloak</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%AE%89%E8%A3%85keycloak-oidc-wildfly-adapter-13"><span class="nav-number">1.10.2.2.</span> <span class="nav-text">安装keycloak-oidc-wildfly-adapter-13:</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%9C%A8keycloak%E4%B8%AD%E5%88%9B%E5%BB%BAclient"><span class="nav-number">1.10.2.3.</span> <span class="nav-text">在keycloak中创建client</span></a></li><li class="nav-item nav-level-4"><a class="nav-link" href="#%E5%90%AF%E5%8A%A8%E5%BA%94%E7%94%A8app-profile-jee-jsp"><span class="nav-number">1.10.2.4.</span> <span class="nav-text">启动应用app-profile-jee-jsp:</span></a></li></ol></li></ol></li></ol></li></ol></div>
+      </div>
+      <!--/noindex-->
+
+      <div class="site-overview-wrap sidebar-panel">
+        <div class="site-author motion-element" itemprop="author" itemscope itemtype="http://schema.org/Person">
+  <p class="site-author-name" itemprop="name">sinjoywong</p>
+  <div class="site-description" itemprop="description">围绕分布式存储</div>
+</div>
+<div class="site-state-wrap motion-element">
+  <nav class="site-state">
+      <div class="site-state-item site-state-posts">
+          <a href="/archives/">
+        
+          <span class="site-state-item-count">4</span>
+          <span class="site-state-item-name">日志</span>
+        </a>
+      </div>
+      <div class="site-state-item site-state-categories">
+            <a href="/categories/">
+          
+        <span class="site-state-item-count">2</span>
+        <span class="site-state-item-name">分类</span></a>
+      </div>
+      <div class="site-state-item site-state-tags">
+            <a href="/tags/">
+          
+        <span class="site-state-item-count">2</span>
+        <span class="site-state-item-name">标签</span></a>
+      </div>
+  </nav>
+</div>
+  <div class="links-of-author motion-element">
+      <span class="links-of-author-item">
+        <a href="https://github.com/sinjoywong" title="GitHub → https:&#x2F;&#x2F;github.com&#x2F;sinjoywong" rel="noopener" target="_blank"><i class="fab fa-github fa-fw"></i>GitHub</a>
+      </span>
+  </div>
+
+
+
+      </div>
+
+    </div>
+  </aside>
+  <div id="sidebar-dimmer"></div>
+
+
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="footer-inner">
+        
+
+        
+
+<script async src="https://busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script>
+
+<div class="copyright">
+  
+  &copy; 
+  <span itemprop="copyrightYear">2021</span>
+  <span class="with-love">
+    <i class="fa fa-heart"></i>
+  </span>
+  <span class="author" itemprop="copyrightHolder">sinjoywong</span>
+    <span class="post-meta-divider">|</span>
+    <span class="post-meta-item-icon">
+      <i class="fa fa-chart-area"></i>
+    </span>
+    <span title="站点总字数">20k</span>
+    <span class="post-meta-divider">|</span>
+    <span class="post-meta-item-icon">
+      <i class="fa fa-coffee"></i>
+    </span>
+    <span title="站点阅读时长">18 分钟</span>
+</div>
+  <div class="powered-by">
+    <i class="fa fa-user-md"></i><span id="busuanzi_container_site_uv">
+      本站访客数:<span id="busuanzi_value_site_uv"></span>
+    </span>
+  </div>
+  <!--div class="powered-by">由 <a href="https://hexo.io/" class="theme-link" rel="noopener" target="_blank">Hexo</a> & <a href="https://pisces.theme-next.org/" class="theme-link" rel="noopener" target="_blank">NexT.Pisces</a> 强力驱动
+  </div>
+  -->
+
+<div class="theme-info">
+  <div class="powered-by"></div>
+  <span class="post-count">博客全站共4k字</span>
+</div>
+
+
+  <script src='https://unpkg.com/mermaid@/dist/mermaid.min.js'></script>
+  <script>
+    if (window.mermaid) {
+      mermaid.initialize({theme: 'forest'});
+    }
+  </script>
+
+
+        
+
+
+
+
+
+
+
+
+      </div>
+    </footer>
+  </div>
+
+  
+  <script src="/lib/anime.min.js"></script>
+  <script src="/lib/velocity/velocity.min.js"></script>
+  <script src="/lib/velocity/velocity.ui.min.js"></script>
+
+<script src="/js/utils.js"></script>
+
+<script src="/js/motion.js"></script>
+
+
+<script src="/js/schemes/pisces.js"></script>
+
+
+<script src="/js/next-boot.js"></script>
+
+
+
+
+  
+
+
+
+
+
+
+
+
+
+
+
+
+
+<script>
+if (document.querySelectorAll('pre.mermaid').length) {
+  NexT.utils.getScript('//cdn.jsdelivr.net/npm/mermaid@8/dist/mermaid.min.js', () => {
+    mermaid.initialize({
+      theme    : 'forest',
+      logLevel : 3,
+      flowchart: { curve     : 'linear' },
+      gantt    : { axisFormat: '%m/%d/%Y' },
+      sequence : { actorMargin: 50 }
+    });
+  }, window.mermaid);
+}
+</script>
+
+
+  
+
+  
+
+</body>
+</html>
